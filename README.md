@@ -30,14 +30,19 @@ The percentage becomes a letter grade on the usual scale: A+ 97, A 93, A− 90, 
 
 ## Algorithms
 
-| Sorting        | Searching     | Graphs               |
-| -------------- | ------------- | -------------------- |
-| Bubble Sort    | Binary Search | Breadth-First Search |
-| Selection Sort |               | Depth-First Search   |
-| Insertion Sort |               | Dijkstra’s Algorithm |
-| Merge Sort     |               |                      |
-| Quick Sort     |               |                      |
-| Heap Sort      |               |                      |
+The site is split into two pages ("books"):
+
+**Sorting** (`#/`, the home page)
+
+- Simple sorts: Bubble, Selection, Insertion
+- Efficient sorts: Merge, Quick, Heap
+
+**Searching** (`#/searching`)
+
+- Searching an array: Linear, Binary, Jump, Interpolation, Exponential
+- Searching a graph: Breadth-First Search, Depth-First Search, Dijkstra’s Algorithm
+
+Which algorithms go on which page, and in what order, is set by `BOOKS` at the top of `js/app.js`.
 
 ## Run locally
 
@@ -77,7 +82,7 @@ js/algorithms/*.js    one file per algorithm
 
 ## Adding an algorithm
 
-Create `js/algorithms/<name>.js`, add a `<script>` tag for it in `index.html`, and call `BTA.register({...})`. The full contract is documented at the top of `js/core.js`. In short:
+Create `js/algorithms/<name>.js`, add a `<script>` tag for it in `index.html`, call `BTA.register({...})`, and add its id to a part in `BOOKS` in `js/app.js`. The full contract is documented at the top of `js/core.js`. In short:
 
 - `generate(size)` returns a random input.
 - `build(input)` simulates the algorithm and returns `{ steps, final, stats }`.

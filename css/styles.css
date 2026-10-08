@@ -492,6 +492,68 @@ select {
   }
 }
 
+/* The Searching page reuses the masthead with a smaller title. */
+.book-title {
+  font-size: clamp(2.6rem, 7vw, 4.4rem);
+}
+
+.masthead .crumb {
+  margin-bottom: 14px;
+}
+
+.how-to p {
+  margin: 0 0 8px;
+  color: var(--ink-2);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.how-to p:last-child {
+  margin-bottom: 0;
+}
+
+.book-label {
+  margin: 30px 0 -14px;
+  color: var(--ink-2);
+  font: italic 500 1.1rem var(--serif);
+}
+
+/* A link card to the other book, like the "continued in" line at the end of a chapter. */
+.book-link {
+  display: grid;
+  gap: 2px;
+  margin-top: 40px;
+  padding: 16px 20px;
+  border: 1.5px solid var(--ink);
+  background: var(--sheet);
+  text-decoration: none;
+  transition: background-color 0.15s;
+}
+
+.book-link:hover {
+  background: color-mix(in srgb, var(--hl-yellow) 30%, var(--sheet));
+}
+
+.book-link-label {
+  color: var(--ink-3);
+  font: 0.8rem var(--mono);
+}
+
+.book-link-title {
+  font: 600 1.7rem/1.2 var(--serif);
+}
+
+.book-link:hover .book-link-title {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+}
+
+.book-link-blurb {
+  color: var(--ink-2);
+  font-size: 0.95rem;
+}
+
 .foot {
   margin-top: 40px;
   padding-top: 12px;
@@ -804,12 +866,16 @@ select {
   text-align: center;
 }
 
+/* Long arrays wrap onto a second line on narrow screens rather than hiding off the edge. */
 .track {
   --gap: 8px;
   --max: 66px;
   display: flex;
-  gap: var(--gap);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px var(--gap);
   width: max-content;
+  max-width: 100%;
   margin-inline: auto;
   padding: 22px 6px 6px;
 }
@@ -1967,6 +2033,15 @@ button.cell {
 .report tbody th a {
   font: 600 1.15rem var(--serif);
   text-decoration: none;
+}
+
+.report tr.rc-book th {
+  padding-top: 22px;
+  border-bottom: 1.5px solid var(--ink);
+}
+
+.report tr.rc-book a {
+  font: italic 500 1.25rem var(--serif);
 }
 
 .report tbody th a:hover {

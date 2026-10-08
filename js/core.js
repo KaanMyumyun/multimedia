@@ -66,6 +66,15 @@
     return v;
   };
 
+  // A target for a search exercise: usually one of the values, sometimes missing.
+  BTA.searchTarget = (values, lo = 1, hi = 99) => {
+    if (Math.random() < 0.75) return values[BTA.randInt(0, values.length - 1)];
+    let t;
+    do t = BTA.randInt(lo, hi);
+    while (values.includes(t));
+    return t;
+  };
+
   // ---------- text ----------
 
   // ['3', '5', '8'] → "3, 5 and 8"

@@ -10,14 +10,49 @@
   'use strict';
 
   const app = document.getElementById('app');
-  const algos = BTA.algorithms;
   const plural = BTA.plural;
 
-  const PARTS = [
-    ['Sorting', 'Part I'],
-    ['Searching', 'Part II'],
-    ['Graphs', 'Part III'],
+  // The site is two books, each on its own page, with its algorithms in chapter order.
+  const BOOKS = [
+    {
+      id: 'sorting',
+      href: '#/',
+      title: 'Sorting',
+      blurb: 'Bubble, selection, insertion, merge, quick and heap sort.',
+      parts: [
+        { title: 'Simple sorts', ids: ['bubble', 'selection', 'insertion'] },
+        { title: 'Efficient sorts', ids: ['merge', 'quick', 'heap'] },
+      ],
+    },
+    {
+      id: 'searching',
+      href: '#/searching',
+      title: 'Searching',
+      blurb: 'Linear, binary, jump, interpolation and exponential search, then BFS, DFS and Dijkstra on graphs.',
+      parts: [
+        { title: 'Searching an array', ids: ['linear', 'binary', 'jump', 'interpolation', 'exponential'] },
+        { title: 'Searching a graph', ids: ['bfs', 'dfs', 'dijkstra'] },
+      ],
+    },
   ];
+  const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+
+  // Every algorithm in reading order: for "Next" links and the report card.
+  const algos = BOOKS.flatMap((b) => b.parts.flatMap((p) => p.ids)).map((id) => BTA.get(id));
+
+  // Where an algorithm sits: its book, its part, and its chapter number in that book.
+  function placeOf(a) {
+    for (const book of BOOKS) {
+      let chapter = 0;
+      for (const [i, part] of book.parts.entries()) {
+        for (const id of part.ids) {
+          chapter++;
+          if (id === a.id) return { book, part, partNo: ROMAN[i], chapter: String(chapter).padStart(2, '0') };
+        }
+      }
+    }
+    throw new Error(`${a.id} is not in any book`);
+  }
 
   const MODES = {
     learn: { label: 'Learn', note: 'A worked example. Step through it and read why each move is made.' },
@@ -28,8 +63,6 @@
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const textOf = (html) => html.replace(/<[^>]+>/g, '');
   const stripLead = (html) => html.replace(/^(Correct|Right|Yes|Exactly)[.!]?\s*/, '');
-  const chapterNo = (a) => String(algos.indexOf(a) + 1).padStart(2, '0');
-  const partOf = (a) => PARTS.find(([g]) => g === a.group)[1];
   const fmtTime = (ms) => {
     const s = Math.round(ms / 1000);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -133,22 +166,31 @@
     ui = null;
     const [, id, mode] = location.hash.match(/^#\/([\w-]+)(?:\/(\w+))?/) || [];
     const algo = id && BTA.get(id);
-    if (id === 'report') reportPage();
-    else if (algo) playPage(algo, MODES[mode] ? mode : 'practice');
-    else homePage();
+    let section;
+    if (id === 'report') {
+      reportPage();
+      section = 'report';
+    } else if (algo) {
+      playPage(algo, MODES[mode] ? mode : 'practice');
+      section = placeOf(algo).book.id;
+    } else {
+      const book = BOOKS.find((b) => b.id === id) || BOOKS[0];
+      bookPage(book);
+      section = book.id;
+    }
     document.querySelectorAll('.nav a').forEach((a) => {
-      const on = a.dataset.nav === (id === 'report' ? 'report' : 'contents');
-      if (on) a.setAttribute('aria-current', 'page');
+      if (a.dataset.nav === section) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     });
     window.scrollTo(0, 0);
   }
 
-  // ---------- contents ----------
+  // ---------- book pages: Sorting (home) and Searching ----------
 
-  function homePage() {
-    document.title = 'Be the Algorithm';
+  function bookPage(book) {
+    document.title = book.id === 'sorting' ? 'Be the Algorithm' : `${book.title} · Be the Algorithm`;
     const progress = store.all();
+    const other = BOOKS.find((b) => b !== book);
 
     const chapter = (a) => {
       const r = progress[a.id] || {};
@@ -156,7 +198,7 @@
       return `
         <li>
           <a class="chapter" href="#/${a.id}">
-            <span class="ch-no">${chapterNo(a)}</span>
+            <span class="ch-no">${placeOf(a).chapter}</span>
             <span class="ch-name">${a.name}</span>
             <span class="ch-dots" aria-hidden="true"></span>
             <span class="ch-cx" title="Average time">${a.complexity.average}</span>
@@ -169,7 +211,9 @@
         </li>`;
     };
 
-    app.innerHTML = `
+    const head =
+      book.id === 'sorting'
+        ? `
       <header class="masthead">
         <div class="masthead-main">
           <h1 class="site-title"><span class="marker">Be</span> the Algorithm</h1>
@@ -184,14 +228,38 @@
           </dl>
         </aside>
       </header>
+      <h2 class="book-label">Book one: Sorting</h2>`
+        : `
+      <header class="masthead">
+        <div class="masthead-main">
+          <p class="crumb"><a href="#/">Be the Algorithm</a><span aria-hidden="true">/</span>Book two</p>
+          <h1 class="site-title book-title"><span class="marker">Searching</span></h1>
+          <p class="tagline">Find a value in an array, or find your way around a graph. Eight algorithms, from the obvious to the clever.</p>
+        </div>
+        <aside class="how-to" aria-label="Where to start">
+          <h2>Where to start</h2>
+          <p>Do Linear and Binary Search first. Jump, Interpolation and Exponential Search are each a twist on one of them.</p>
+          <p>For graphs, do Breadth-First Search before Depth-First Search, then Dijkstra.</p>
+        </aside>
+      </header>`;
 
-      ${PARTS.map(
-        ([g, part]) => `
+    app.innerHTML = `
+      ${head}
+      ${book.parts
+        .map(
+          (p, i) => `
         <section class="part">
-          <h2 class="part-title"><span class="part-no">${part}</span> ${g}</h2>
-          <ol class="chapters">${algos.filter((a) => a.group === g).map(chapter).join('')}</ol>
+          <h2 class="part-title"><span class="part-no">Part ${ROMAN[i]}</span> ${p.title}</h2>
+          <ol class="chapters">${p.ids.map((id) => chapter(BTA.get(id))).join('')}</ol>
         </section>`,
-      ).join('')}
+        )
+        .join('')}
+
+      <a class="book-link" href="${other.href}">
+        <span class="book-link-label">${book.id === 'sorting' ? 'Book two' : 'Book one'}</span>
+        <span class="book-link-title">${other.title} <span aria-hidden="true">→</span></span>
+        <span class="book-link-blurb">${other.blurb}</span>
+      </a>
 
       <footer class="foot">
         Grades are saved in this browser only. <a href="#/report">See your report card</a>.
@@ -208,25 +276,28 @@
     const learned = algos.filter((a) => progress[a.id]?.learned).length;
 
     const pct = (m) => (m ? `<span class="rc-pct">${m.best}%</span>` : '');
-    const rows = algos
-      .map((a) => {
-        const r = progress[a.id] || {};
-        const runs = (r.practice?.plays || 0) + (r.test?.plays || 0);
-        return `
+    const row = (a) => {
+      const r = progress[a.id] || {};
+      const runs = (r.practice?.plays || 0) + (r.test?.plays || 0);
+      return `
           <tr>
-            <td class="rc-no">${chapterNo(a)}</td>
+            <td class="rc-no">${placeOf(a).chapter}</td>
             <th scope="row"><a href="#/${a.id}">${a.name}</a></th>
             <td class="rc-learn">${r.learned ? '<span class="tick" aria-label="Watched">✓</span>' : '<span class="muted">—</span>'}</td>
             <td>${gradeTag(r.practice)} ${pct(r.practice)}</td>
             <td>${gradeTag(r.test)} ${pct(r.test)}</td>
             <td class="rc-runs">${runs || '<span class="muted">—</span>'}</td>
           </tr>`;
-      })
-      .join('');
+    };
+    const rows = BOOKS.map(
+      (b) => `
+          <tr class="rc-book"><th scope="rowgroup" colspan="6"><a href="${b.href}">${b.title}</a></th></tr>
+          ${b.parts.flatMap((p) => p.ids).map((id) => row(BTA.get(id))).join('')}`,
+    ).join('');
 
     app.innerHTML = `
       <header class="page-head">
-        <p class="crumb"><a href="#/">Contents</a><span aria-hidden="true">/</span>Report card</p>
+        <p class="crumb"><a href="#/">Be the Algorithm</a><span aria-hidden="true">/</span>Report card</p>
         <h1>Report card</h1>
         <p class="blurb">Your best grade for each algorithm in this browser.</p>
       </header>
@@ -278,12 +349,13 @@
   function playPage(algo, mode) {
     const noun = algo.group === 'Graphs' ? 'graph' : 'array';
     const cx = algo.complexity;
+    const place = placeOf(algo);
 
     app.innerHTML = `
       <div class="play">
         <header class="page-head">
           <p class="crumb">
-            <a href="#/">Contents</a><span aria-hidden="true">/</span>${partOf(algo)}: ${algo.group}<span aria-hidden="true">/</span>Chapter ${chapterNo(algo)}
+            <a href="${place.book.href}">${place.book.title}</a><span aria-hidden="true">/</span>Part ${place.partNo}: ${place.part.title}<span aria-hidden="true">/</span>Chapter ${place.chapter}
           </p>
           <h1>${algo.name}</h1>
           <p class="blurb">${algo.blurb}</p>
