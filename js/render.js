@@ -192,11 +192,14 @@
       'aria-label': 'Graph',
     });
 
+    const marks = svg('g', { class: 'edge-marks' });
     const edges = svg('g', { class: 'edges' });
     const weights = svg('g', { class: 'weights' });
     for (const e of view.edges) {
       const [ax, ay] = at[e.u];
       const [bx, by] = at[e.v];
+      // A wide highlighter stroke drawn under the edge being worked on.
+      if (e.state === 'active') marks.append(svg('line', { class: 'edge-hl', x1: ax, y1: ay, x2: bx, y2: by }));
       edges.append(svg('line', { class: `edge e-${e.state}`, x1: ax, y1: ay, x2: bx, y2: by }));
       if (e.w != null) {
         const mx = (ax + bx) / 2;
@@ -211,7 +214,7 @@
         );
       }
     }
-    root.append(edges, weights);
+    root.append(marks, edges, weights);
 
     for (const n of view.nodes) {
       const [x, y] = at[n.id];

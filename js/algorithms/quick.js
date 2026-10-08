@@ -158,7 +158,7 @@
           line: 6,
           view: beforePivot,
           prompt: `Where does the pivot <b>${pv}</b> go? Click its final position.`,
-          ask: { type: 'pick', answer: [String(p)] },
+          ask: { type: 'pick', answer: [String(p)], position: true },
           hint: `It goes right after all the elements smaller than ${pv}. Count them, starting at position ${lo}.`,
           correct:
             `Exactly. ${less.length} ${plural(less.length, 'element is', 'elements are')} smaller, so ${pv} lands at position ${p}. ` +

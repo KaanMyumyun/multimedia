@@ -10,7 +10,8 @@
  * A step is one question:
  *   view     – what the stage shows while the question is asked
  *   prompt   – HTML question text
- *   ask      – { type: 'pick',   answer: [keys], count? }  click N elements
+ *   ask      – { type: 'pick',   answer: [keys], count?, position? }  click N elements
+ *              (position: the answer is a slot, not the value in it)
  *              { type: 'multi',  answer: [keys] }          select any number, then Check
  *              { type: 'choice', answer: value, options: [{ label, value }] }
  *              { type: 'info' }                            no question, just Continue

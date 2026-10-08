@@ -86,7 +86,7 @@
           line: 3,
           view: before,
           prompt: `Where does <b>${key}</b> belong in the sorted part? Click the position it will end up in.`,
-          ask: { type: 'pick', answer: [String(pos)] },
+          ask: { type: 'pick', answer: [String(pos)], position: true },
           hint: `Move left past every value bigger than ${key}. Stop at the first value smaller than ${key}, or at the start.`,
           correct:
             (pos === i

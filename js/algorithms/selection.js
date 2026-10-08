@@ -84,7 +84,7 @@
           line: 4,
           view: before,
           prompt: `Where does <b>${mv}</b> go? Click its new position.`,
-          ask: { type: 'pick', answer: [String(i)] },
+          ask: { type: 'pick', answer: [String(i)], position: true },
           hint: 'Selection Sort grows the sorted part from the left, one position at a time.',
           correct:
             (m === i
