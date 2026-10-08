@@ -165,5 +165,31 @@
         ],
       };
     },
+    trace(values) {
+      const a = values.slice();
+      const n = a.length;
+      const ev = [];
+      const sift = (i, size) => {
+        for (;;) {
+          let big = i;
+          for (const c of [2 * i + 1, 2 * i + 2]) {
+            if (c >= size) continue;
+            ev.push(['c', c, big]);
+            if (a[c] > a[big]) big = c;
+          }
+          if (big === i) return;
+          [a[i], a[big]] = [a[big], a[i]];
+          ev.push(['s', i, big]);
+          i = big;
+        }
+      };
+      for (let i = Math.floor(n / 2) - 1; i >= 0; i--) sift(i, n);
+      for (let end = n - 1; end >= 1; end--) {
+        [a[0], a[end]] = [a[end], a[0]];
+        ev.push(['s', 0, end]);
+        sift(0, end);
+      }
+      return ev;
+    },
   });
 })();

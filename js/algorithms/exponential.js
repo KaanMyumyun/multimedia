@@ -8,7 +8,7 @@
     group: 'Searching',
     blurb: 'Double the step until you pass the target, then binary search that stretch.',
     complexity: { best: 'O(1)', average: 'O(log i)', worst: 'O(log n)', space: 'O(1)', stable: '—' },
-    input: { label: 'Size', options: [9, 12, 16, 20], default: 16 },
+    input: { label: 'Size', options: [9, 12, 16, 20], default: 16, target: true, sorted: true },
     how: [
       'This only works on a <b>sorted</b> array.',
       'Check position 0, then positions 1, 2, 4, 8, … doubling each time, until the value there is at least the target.',

@@ -85,7 +85,7 @@
   function cellNode(c, max, index) {
     if (!c || c.ghost) return el('div', { class: 'cell ghost', 'aria-hidden': 'true' });
     const clickable = c.key != null;
-    const h = Math.max(8, Math.round((c.value / max) * 100));
+    const h = max > 0 ? Math.min(100, Math.max(8, Math.round((c.value / max) * 100))) : 8;
     const node = el(
       clickable ? 'button' : 'div',
       {
@@ -197,9 +197,27 @@
     const weights = svg('g', { class: 'weights' });
     for (const e of view.edges) {
       const [ax, ay] = at[e.u];
-      const [bx, by] = at[e.v];
+      let [bx, by] = at[e.v];
       // A wide highlighter stroke drawn under the edge being worked on.
       if (e.state === 'active') marks.append(svg('line', { class: 'edge-hl', x1: ax, y1: ay, x2: bx, y2: by }));
+      if (view.directed) {
+        // Stop the line at the target node's rim and put an arrowhead there.
+        const len = Math.hypot(bx - ax, by - ay);
+        const ux = (bx - ax) / len;
+        const uy = (by - ay) / len;
+        const tipX = bx - ux * 29;
+        const tipY = by - uy * 29;
+        const baseX = tipX - ux * 13;
+        const baseY = tipY - uy * 13;
+        edges.append(
+          svg('polygon', {
+            class: `arrow e-${e.state}`,
+            points: `${tipX},${tipY} ${baseX - uy * 6.5},${baseY + ux * 6.5} ${baseX + uy * 6.5},${baseY - ux * 6.5}`,
+          }),
+        );
+        bx = baseX;
+        by = baseY;
+      }
       edges.append(svg('line', { class: `edge e-${e.state}`, x1: ax, y1: ay, x2: bx, y2: by }));
       if (e.w != null) {
         const mx = (ax + bx) / 2;
@@ -216,6 +234,26 @@
     }
     root.append(marks, edges, weights);
 
+    // Put each badge on the side of its node that is furthest from the node's edges,
+    // so a badge never hides an edge or an arrowhead.
+    const edgeAngles = Object.fromEntries(view.nodes.map((n) => [n.id, []]));
+    for (const e of view.edges) {
+      const [ax, ay] = at[e.u];
+      const [bx, by] = at[e.v];
+      edgeAngles[e.u].push(Math.atan2(by - ay, bx - ax));
+      edgeAngles[e.v].push(Math.atan2(ay - by, ax - bx));
+    }
+    const SIDES = [-45, -135, 45, 135, -90, 90, 0, 180].map((d) => (d * Math.PI) / 180);
+    const gap = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    const badgeSide = (id) =>
+      SIDES.reduce(
+        (best, s) => {
+          const clear = Math.min(Math.PI, ...edgeAngles[id].map((t) => gap(s, t)));
+          return clear > best.clear + 0.01 ? { s, clear } : best;
+        },
+        { s: SIDES[0], clear: -1 },
+      ).s;
+
     for (const n of view.nodes) {
       const [x, y] = at[n.id];
       const g = svg(
@@ -225,15 +263,16 @@
           'data-key': n.key,
           tabindex: '0',
           role: 'button',
-          'aria-label': `Node ${n.id}` + (n.badge != null ? `, distance ${n.badge}` : ''),
+          'aria-label': `Node ${n.id}` + (n.badge != null ? `, ${view.badgeName} ${n.badge}` : ''),
         },
         svg('circle', { class: 'ring', cx: x, cy: y, r: 33 }),
         svg('circle', { class: 'disc', cx: x, cy: y, r: 26 }),
         svg('text', { x, y }, n.id),
       );
       if (n.badge != null) {
-        const bx = x + 26;
-        const by = y - 28;
+        const side = badgeSide(n.id);
+        const bx = x + 39 * Math.cos(side);
+        const by = y + 39 * Math.sin(side);
         const wide = n.badge.length > 1;
         g.append(
           svg(

@@ -33,6 +33,7 @@
       'Like BFS it handles each node and edge once, so it runs in O(V + E). It uses a stack (or recursion) instead of a queue. ' +
       'DFS is the basis for cycle detection, topological sorting, maze solving and finding connected components.',
 
+    graph: {},
     generate: () => randomGraph({ extra: 3 }),
 
     build(g) {

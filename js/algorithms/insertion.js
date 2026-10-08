@@ -113,5 +113,23 @@
         ],
       };
     },
+    trace(values) {
+      const a = values.slice();
+      const ev = [];
+      for (let i = 1; i < a.length; i++) {
+        const key = a[i];
+        let j = i - 1;
+        while (j >= 0) {
+          ev.push(['c', j, j + 1]);
+          if (a[j] <= key) break;
+          a[j + 1] = a[j];
+          ev.push(['w', j + 1, a[j]]);
+          j--;
+        }
+        a[j + 1] = key;
+        ev.push(['w', j + 1, key]);
+      }
+      return ev;
+    },
   });
 })();

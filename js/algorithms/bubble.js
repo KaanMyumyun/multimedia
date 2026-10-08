@@ -160,5 +160,23 @@
         ],
       };
     },
+    trace(values) {
+      const a = values.slice();
+      const n = a.length;
+      const ev = [];
+      for (let pass = 0; pass < n - 1; pass++) {
+        let swapped = false;
+        for (let j = 0; j < n - 1 - pass; j++) {
+          ev.push(['c', j, j + 1]);
+          if (a[j] > a[j + 1]) {
+            [a[j], a[j + 1]] = [a[j + 1], a[j]];
+            ev.push(['s', j, j + 1]);
+            swapped = true;
+          }
+        }
+        if (!swapped) break;
+      }
+      return ev;
+    },
   });
 })();

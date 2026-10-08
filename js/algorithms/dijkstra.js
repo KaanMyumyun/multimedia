@@ -57,6 +57,10 @@
       'With a priority queue this runs in O((V + E) log V). The green edges form the shortest-path tree: follow them back to A to get the actual route. ' +
       'This is the core of how maps and network routers find shortest paths.',
 
+    graph: { weighted: true },
+    // A tie for "closest node" would give a question two right answers.
+    validate: (g) => (hasTies(g) ? 'Two nodes tie for closest at some point, so a question would have two right answers.' : null),
+
     generate() {
       let g;
       let tries = 0;

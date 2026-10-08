@@ -35,6 +35,7 @@
       'Each node and each edge is handled once, so BFS runs in O(V + E). ' +
       'The green edges form a shortest-path tree: following them back to the start gives the path with the fewest edges.',
 
+    graph: {},
     generate: () => randomGraph({ extra: 3 }),
 
     build(g) {

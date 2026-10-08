@@ -26,7 +26,7 @@
     group: 'Searching',
     blurb: 'Jump ahead a block at a time, then scan back through one block.',
     complexity: { best: 'O(1)', average: 'O(√n)', worst: 'O(√n)', space: 'O(1)', stable: '—' },
-    input: { label: 'Size', options: [9, 16, 25], default: 16 },
+    input: { label: 'Size', options: [9, 16, 25], default: 16, target: true, sorted: true },
     how: [
       'This only works on a <b>sorted</b> array.',
       'Split the array into blocks of ⌊√n⌋ elements.',

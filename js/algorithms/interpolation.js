@@ -25,7 +25,7 @@
     group: 'Searching',
     blurb: 'Guess where the target should be from its value, like opening a dictionary near the right letter.',
     complexity: { best: 'O(1)', average: 'O(log log n)', worst: 'O(n)', space: 'O(1)', stable: '—' },
-    input: { label: 'Size', options: [8, 10, 12], default: 10 },
+    input: { label: 'Size', options: [8, 10, 12], default: 10, target: true, sorted: true },
     how: [
       'This works on a <b>sorted</b> array whose values are spread out fairly evenly.',
       'Instead of the middle, probe where the target <i>should</i> be: if it is 30% of the way from a[lo] to a[hi] in value, look 30% of the way along.',
@@ -54,7 +54,7 @@
 
     generate(n) {
       // Roughly evenly spaced values, so the estimates are good.
-      const gap = randInt(6, 9);
+      const gap = randInt(5, Math.min(9, Math.floor(92 / n))); // keeps every value under 100
       const base = randInt(1, 6);
       const values = [];
       for (let i = 0; i < n; i++) values.push(base + i * gap + randInt(0, gap - 2));

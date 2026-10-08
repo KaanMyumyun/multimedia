@@ -3,9 +3,16 @@
  *
  * An algorithm module calls BTA.register({...}) with:
  *   id, name, group, blurb, complexity, how[], code[], legend[], summary
- *   input    – { label, options[], default } for a size picker (omit for graphs)
+ *   input    – array exercises: { label, options[], default } for the size picker, plus
+ *              rules for typed-in arrays (see inputRules): length, range, distinct,
+ *              sorted (sort what was typed), target (a search: the input is { values, target })
+ *   graph    – graph exercises instead of input: { weighted?, directed? }
+ *   validate(input) → optional extra check for a graph from a link; an error message or null
  *   generate(size) → a fresh random input
  *   build(input)   → { steps[], final (view), stats[[label, value]] }
+ *   trace(values)  → sorts only: the operations for the race page, as
+ *                    ['c', i, j] compare · ['s', i, j] swap · ['w', i, v] write
+ *                    ['r', i] read · ['k'] any other step (counting sort's counters)
  *
  * A step is one question:
  *   view     – what the stage shows while the question is asked
@@ -73,6 +80,74 @@
     do t = BTA.randInt(lo, hi);
     while (values.includes(t));
     return t;
+  };
+
+  // ---------- typed-in and linked inputs ----------
+
+  // The rules an exercise's typed-in array must follow.
+  BTA.inputRules = (algo) => {
+    const i = algo.input || {};
+    return {
+      length: i.length || (i.target ? [2, 25] : [2, 12]),
+      range: i.range || [0, 99],
+      distinct: i.distinct !== false,
+      sorted: !!i.sorted,
+      target: !!i.target,
+    };
+  };
+
+  // "8, 3 5" → { values: [8, 3, 5] }, or { error }.
+  BTA.parseNumbers = (text) => {
+    const parts = String(text).trim().split(/[\s,;]+/).filter(Boolean);
+    if (!parts.length) return { error: 'Type some numbers, for example 8 3 5 1.' };
+    const bad = parts.find((p) => !/^\d+$/.test(p));
+    if (bad) return { error: `“${bad}” isn’t a whole number from 0 up.` };
+    return { values: parts.map(Number) };
+  };
+
+  // An error message, or null if the values follow the rules.
+  BTA.checkValues = (values, { length: [min, max], range: [lo, hi], distinct }) => {
+    if (values.length < min) return `Use at least ${min} numbers.`;
+    if (values.length > max) return `Use at most ${max} numbers.`;
+    const out = values.find((v) => v < lo || v > hi);
+    if (out != null) return `${out} is out of range. Use numbers from ${lo} to ${hi}.`;
+    if (distinct) {
+      const seen = new Set();
+      for (const v of values) {
+        if (seen.has(v)) return `${v} appears twice. Use different numbers, so every question has one right answer.`;
+        seen.add(v);
+      }
+    }
+    return null;
+  };
+
+  // An exercise's input as link parameters: a=8,3,5 · t=5 (search target) · e=AB3,AC5 (graph edges).
+  BTA.toParams = (algo, input) => {
+    if (algo.graph) return { e: input.edges.map((e) => e.u + e.v + (e.w == null ? '' : e.w)).join(',') };
+    if (BTA.inputRules(algo).target) return { a: input.values.join(','), t: String(input.target) };
+    return { a: input.join(',') };
+  };
+
+  // Link parameters back to an input: { input } or { error }.
+  BTA.fromParams = (algo, params) => {
+    if (algo.graph) {
+      const r = BTA.decodeGraph(params.get('e') || '', algo.graph);
+      if (r.error) return r;
+      const err = algo.validate ? algo.validate(r.graph) : null;
+      return err ? { error: err } : { input: r.graph };
+    }
+    const rules = BTA.inputRules(algo);
+    const r = BTA.parseNumbers(params.get('a') || '');
+    if (r.error) return r;
+    const err = BTA.checkValues(r.values, rules);
+    if (err) return { error: err };
+    const values = rules.sorted ? r.values.slice().sort((x, y) => x - y) : r.values;
+    if (!rules.target) return { input: values };
+    const t = String(params.get('t') || '').trim();
+    if (!/^\d+$/.test(t) || +t > rules.range[1]) {
+      return { error: `The target has to be a whole number from ${rules.range[0]} to ${rules.range[1]}.` };
+    }
+    return { input: { values, target: Number(t) } };
   };
 
   // ---------- text ----------
@@ -147,6 +222,72 @@
     ],
   };
 
+  const allowed = new Set(LAYOUT.edges.map(([u, v]) => u + v));
+
+  // A graph from a list of { u, v, w } edges, drawn on the fixed layout.
+  BTA.makeGraph = (edges, { directed = false } = {}) =>
+    BTA.withAdjacency({
+      ids: Object.keys(LAYOUT.nodes),
+      pos: LAYOUT.nodes,
+      width: LAYOUT.width,
+      height: LAYOUT.height,
+      directed,
+      edges: edges.slice().sort((a, b) => BTA.edgeKey(a.u, a.v).localeCompare(BTA.edgeKey(b.u, b.v))),
+    });
+
+  // "AB3,AC5" → { graph } or { error }. Edges must be ones the layout can draw.
+  BTA.decodeGraph = (text, { weighted = false, directed = false } = {}) => {
+    const tokens = String(text).split(',').map((t) => t.trim()).filter(Boolean);
+    if (!tokens.length) return { error: 'The link has no edges in it.' };
+    const shape = weighted ? /^([A-G])([A-G])([1-9])$/ : /^([A-G])([A-G])$/;
+    const seen = new Set();
+    const edges = [];
+    for (const t of tokens) {
+      const m = t.match(shape);
+      if (!m || m[1] === m[2]) return { error: `“${t}” isn’t a valid edge.` };
+      const [, u, v] = m;
+      const key = BTA.edgeKey(u, v);
+      if (!allowed.has(key)) return { error: `${u}–${v} can’t be drawn on this layout.` };
+      if (seen.has(key)) return { error: `${u}–${v} appears twice.` };
+      seen.add(key);
+      const [a, b] = directed || u < v ? [u, v] : [v, u];
+      edges.push({ u: a, v: b, w: weighted ? Number(m[3]) : null });
+    }
+    const g = BTA.makeGraph(edges, { directed });
+
+    // Every node must be reachable (ignoring arrow directions).
+    const reach = new Set(['A']);
+    const stack = ['A'];
+    while (stack.length) {
+      const x = stack.pop();
+      for (const e of g.edges) {
+        const y = e.u === x ? e.v : e.v === x ? e.u : null;
+        if (y && !reach.has(y)) reach.add(y) && stack.push(y);
+      }
+    }
+    if (reach.size < g.ids.length) return { error: 'Some nodes aren’t connected to the rest of the graph.' };
+    if (directed && BTA.topoOrder(g).length < g.ids.length) {
+      return { error: 'The arrows go round in a circle, so there is no valid order.' };
+    }
+    return { graph: g };
+  };
+
+  // Kahn's algorithm, taking the alphabetically first ready node each time.
+  // Shorter than the node count if there is a cycle.
+  BTA.topoOrder = (g) => {
+    const indeg = Object.fromEntries(g.ids.map((id) => [id, 0]));
+    for (const e of g.edges) indeg[e.v]++;
+    const ready = g.ids.filter((id) => indeg[id] === 0);
+    const order = [];
+    while (ready.length) {
+      ready.sort();
+      const u = ready.shift();
+      order.push(u);
+      for (const { to } of g.adj[u]) if (--indeg[to] === 0) ready.push(to);
+    }
+    return order;
+  };
+
   // A connected graph: a random spanning tree plus `extra` additional edges.
   BTA.randomGraph = ({ extra = 3, weighted = false } = {}) => {
     const ids = Object.keys(LAYOUT.nodes);
@@ -167,20 +308,25 @@
     }
     chosen.push(...spare.slice(0, extra));
 
-    const edges = chosen
-      .map(([u, v]) => (u < v ? [u, v] : [v, u]))
-      .sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]))
-      .map(([u, v]) => ({ u, v, w: weighted ? BTA.randInt(1, 9) : null }));
+    const edges = chosen.map(([u, v]) => ({ u: u < v ? u : v, v: u < v ? v : u, w: weighted ? BTA.randInt(1, 9) : null }));
+    return BTA.makeGraph(edges);
+  };
 
-    return BTA.withAdjacency({ ids, pos: LAYOUT.nodes, width: LAYOUT.width, height: LAYOUT.height, edges });
+  // A random connected graph with no cycles, its edges turned into arrows.
+  BTA.randomDag = ({ extra = 3 } = {}) => {
+    const g = BTA.randomGraph({ extra });
+    const rank = Object.fromEntries(BTA.shuffle(g.ids.slice()).map((id, i) => [id, i]));
+    const edges = g.edges.map((e) => (rank[e.u] < rank[e.v] ? { u: e.u, v: e.v, w: null } : { u: e.v, v: e.u, w: null }));
+    return BTA.makeGraph(edges, { directed: true });
   };
 
   // (Re)build the adjacency lists, neighbours in alphabetical order.
+  // In a directed graph a node only lists the nodes its arrows point to.
   BTA.withAdjacency = (g) => {
     const adj = Object.fromEntries(g.ids.map((id) => [id, []]));
     for (const e of g.edges) {
       adj[e.u].push({ to: e.v, w: e.w });
-      adj[e.v].push({ to: e.u, w: e.w });
+      if (!g.directed) adj[e.v].push({ to: e.u, w: e.w });
     }
     for (const id of g.ids) adj[id].sort((a, b) => a.to.localeCompare(b.to));
     return { ...g, adj };
@@ -192,6 +338,7 @@
    * Build a graph view.
    *   state  – fn(id) → node state
    *   badge  – fn(id) → small label next to the node (e.g. a distance), or null
+   *   badgeName – what the badge means, for screen readers (default "distance")
    *   edge   – fn(edge) → edge state
    *   lists  – [{ title, note, items: [ids] }] queues, stacks, visit orders
    *   table  – { head: [...], rows: [[...]] }
@@ -200,6 +347,8 @@
     kind: 'graph',
     width: g.width,
     height: g.height,
+    directed: !!g.directed,
+    badgeName: o.badgeName || 'distance',
     chips: o.chips || [],
     nodes: g.ids.map((id) => ({
       id,
@@ -213,4 +362,37 @@
     lists: (o.lists || []).map((l) => ({ ...l, items: l.items.slice() })),
     table: o.table || null,
   });
+
+  // ---------- real code for the Code panel ----------
+
+  BTA.LANGS = [
+    { id: 'python', label: 'Python', comment: '#' },
+    { id: 'javascript', label: 'JS', comment: '//' },
+    { id: 'java', label: 'Java', comment: '//' },
+    { id: 'cpp', label: 'C++', comment: '//' },
+    { id: 'c', label: 'C', comment: '//' },
+  ];
+
+  const impls = {};
+
+  /*
+   * Register an algorithm's code in each language. Every source line starts with
+   * "N|": the pseudocode line(s) it matches, 1-based like the numbers on screen.
+   * Use " |" for lines that match none, and "3,4|" for more than one.
+   */
+  BTA.impl = (id, langs) => {
+    impls[id] = {};
+    for (const [lang, src] of Object.entries(langs)) {
+      impls[id][lang] = src
+        .replace(/^\n+|\s+$/g, '')
+        .split('\n')
+        .map((line) => {
+          const m = line.match(/^\s*([\d,]*)\|(.*)$/);
+          if (!m) throw new Error(`${id}/${lang}: line without a tag: ${line}`);
+          return { tags: m[1] ? m[1].split(',').map((t) => Number(t) - 1) : [], text: m[2] };
+        });
+    }
+  };
+
+  BTA.getImpl = (id) => impls[id] || null;
 })();

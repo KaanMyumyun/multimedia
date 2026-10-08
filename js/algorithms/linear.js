@@ -8,7 +8,7 @@
     group: 'Searching',
     blurb: 'Check the elements one after another until you find the target.',
     complexity: { best: 'O(1)', average: 'O(n)', worst: 'O(n)', space: 'O(1)', stable: '—' },
-    input: { label: 'Size', options: [6, 8, 10, 12], default: 8 },
+    input: { label: 'Size', options: [6, 8, 10, 12], default: 8, target: true, distinct: false },
     how: [
       'Start at the first element.',
       'Compare it with the target. If they match, you are done.',

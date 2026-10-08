@@ -18,10 +18,11 @@
       id: 'sorting',
       href: '#/',
       title: 'Sorting',
-      blurb: 'Bubble, selection, insertion, merge, quick and heap sort.',
+      blurb: 'Bubble, selection, insertion, shell, merge, quick, heap and counting sort, then topological sort for graphs.',
       parts: [
         { title: 'Simple sorts', ids: ['bubble', 'selection', 'insertion'] },
-        { title: 'Efficient sorts', ids: ['merge', 'quick', 'heap'] },
+        { title: 'Efficient sorts', ids: ['shell', 'merge', 'quick', 'heap'] },
+        { title: 'Special-purpose sorts', ids: ['counting', 'topo'] },
       ],
     },
     {
@@ -39,6 +40,9 @@
 
   // Every algorithm in reading order: for "Next" links and the report card.
   const algos = BOOKS.flatMap((b) => b.parts.flatMap((p) => p.ids)).map((id) => BTA.get(id));
+
+  // The sorts that take part in the race: every array sort, in book order.
+  const raceSorts = algos.filter((a) => a.trace);
 
   // Where an algorithm sits: its book, its part, and its chapter number in that book.
   function placeOf(a) {
@@ -160,18 +164,45 @@
   let ui = null; // the play page
   let session = null; // a practice or test run
   let lesson = null; // a learn-mode run
+  let leavePage = null; // cleanup for the race page
+
+  // "#/bubble/test?a=8,3,5" → { id: 'bubble', mode: 'test', params }
+  function parseHash() {
+    const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
+    const [id = '', mode = ''] = path.split('/');
+    return { id, mode, params: new URLSearchParams(query) };
+  }
+
+  // Link parameters are only digits, letters and commas, so they are written as they are.
+  const queryOf = (params) =>
+    Object.entries(params)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('&');
 
   function route() {
     stopRun();
+    if (leavePage) leavePage();
+    leavePage = null;
     ui = null;
-    const [, id, mode] = location.hash.match(/^#\/([\w-]+)(?:\/(\w+))?/) || [];
+    const { id, mode, params } = parseHash();
     const algo = id && BTA.get(id);
     let section;
     if (id === 'report') {
       reportPage();
       section = 'report';
+    } else if (id === 'race') {
+      document.title = 'Sort race · Be the Algorithm';
+      leavePage = BTA.racePage(app, {
+        params,
+        sorts: raceSorts,
+        setUrl: (p) => history.replaceState(null, '', `#/race?${queryOf(p)}`),
+        ownInputForm,
+        copyLink,
+        esc,
+      });
+      section = 'race';
     } else if (algo) {
-      playPage(algo, MODES[mode] ? mode : 'practice');
+      playPage(algo, MODES[mode] ? mode : 'practice', params);
       section = placeOf(algo).book.id;
     } else {
       const book = BOOKS.find((b) => b.id === id) || BOOKS[0];
@@ -254,6 +285,16 @@
         </section>`,
         )
         .join('')}
+
+      ${
+        book.id === 'sorting'
+          ? `<a class="book-link race-link" href="#/race">
+              <span class="book-link-label">Extra</span>
+              <span class="book-link-title">Sort race <span aria-hidden="true">→</span></span>
+              <span class="book-link-blurb">All ${raceSorts.length} array sorts on the same array at once. Guess the winner, then compare comparisons and moves.</span>
+            </a>`
+          : ''
+      }
 
       <a class="book-link" href="${other.href}">
         <span class="book-link-label">${book.id === 'sorting' ? 'Book two' : 'Book one'}</span>
@@ -346,10 +387,11 @@
 
   // ---------- play page ----------
 
-  function playPage(algo, mode) {
+  function playPage(algo, mode, params) {
     const noun = algo.group === 'Graphs' ? 'graph' : 'array';
     const cx = algo.complexity;
     const place = placeOf(algo);
+    const rules = BTA.inputRules(algo);
 
     app.innerHTML = `
       <div class="play">
@@ -378,10 +420,14 @@
                 : ''
             }
             <button class="btn" id="new" type="button">New ${noun}</button>
+            ${algo.input ? `<button class="btn" id="edit" type="button" aria-expanded="false">Your own ${noun}</button>` : ''}
+            <button class="btn quiet" id="share" type="button">Copy link</button>
             <button class="btn quiet" id="restart" type="button">Restart</button>
           </div>
           <p class="mode-note" id="mode-note"></p>
         </div>
+        <p class="notice" id="notice" role="status" hidden></p>
+        <div id="own-slot"></div>
 
         <div class="layout">
           <div class="main">
@@ -396,11 +442,16 @@
               <h2>How it works</h2>
               <ol class="how">${algo.how.map((h) => `<li>${h}</li>`).join('')}</ol>
             </section>
-            <section>
-              <h2>Pseudocode</h2>
-              <ol class="code" id="code">${algo.code
-                .map((l, i) => `<li class="ln" data-line="${i}"><code>${esc(l)}</code></li>`)
-                .join('')}</ol>
+            <section class="code-sec">
+              <div class="code-head">
+                <h2>Code</h2>
+                <button class="link" id="copy-code" type="button">Copy</button>
+              </div>
+              <div class="langs" role="group" aria-label="Language">
+                <button type="button" data-lang="pseudo">Pseudocode</button>
+                ${BTA.LANGS.map((l) => `<button type="button" data-lang="${l.id}">${l.label}</button>`).join('')}
+              </div>
+              <div class="code-box" id="code-box"><ol class="code" id="code"></ol></div>
             </section>
             <section>
               <h2>Key</h2>
@@ -436,6 +487,9 @@
       stageSheet: app.querySelector('.stage-sheet'),
       desk: document.getElementById('desk'),
       code: document.getElementById('code'),
+      codeBox: document.getElementById('code-box'),
+      lang: savedLang(),
+      line: null,
       size: document.getElementById('size'),
       sizeValue: algo.input ? algo.input.default : null,
       input: null,
@@ -453,6 +507,7 @@
     );
     document.getElementById('new').addEventListener('click', newInput);
     document.getElementById('restart').addEventListener('click', start);
+    document.getElementById('share').addEventListener('click', (e) => copyLink(e.currentTarget));
     if (ui.size) {
       ui.size.addEventListener('change', () => {
         ui.sizeValue = Number(ui.size.value);
@@ -460,12 +515,74 @@
       });
     }
 
-    ui.input = algo.generate(ui.sizeValue);
-    setMode(mode, { replaceUrl: false });
+    // Code panel
+    app.querySelectorAll('.langs button').forEach((b) =>
+      b.addEventListener('click', () => {
+        ui.lang = b.dataset.lang;
+        saveLang(ui.lang);
+        renderCode();
+      }),
+    );
+    document.getElementById('copy-code').addEventListener('click', (e) =>
+      copyText(
+        ui.codeLines.map((l) => l.text).join('\n'),
+        e.currentTarget,
+      ),
+    );
+    renderCode();
+
+    // Typing in your own array
+    if (algo.input) {
+      const own = ownInputForm({
+        rules,
+        noun,
+        note: rules.sorted ? `${algo.name} needs a sorted array, so it will be sorted for you.` : '',
+        fill: () => (rules.target ? { a: ui.input.values.join(' '), t: ui.input.target } : { a: ui.input.join(' ') }),
+        parse: (p) => BTA.fromParams(algo, p),
+        onUse: (input) => {
+          ui.input = input;
+          syncSize();
+          start();
+          syncUrl();
+        },
+      });
+      document.getElementById('own-slot').append(own.form);
+      document.getElementById('edit').addEventListener('click', (e) => own.toggle(e.currentTarget));
+    }
+
+    // An exercise from a link
+    if ([...params.keys()].length) {
+      const r = BTA.fromParams(algo, params);
+      if (r.error) {
+        const notice = document.getElementById('notice');
+        notice.textContent = `The ${noun} in this link couldn’t be used: ${r.error} Here is a random one instead.`;
+        notice.hidden = false;
+      } else {
+        ui.input = r.input;
+      }
+    }
+    if (!ui.input) ui.input = algo.generate(ui.sizeValue);
+    syncSize();
+    setMode(mode);
+  }
+
+  // The address bar always holds a link to exactly this exercise.
+  function syncUrl() {
+    const q = queryOf(BTA.toParams(ui.algo, ui.input));
+    history.replaceState(null, '', `#/${ui.algo.id}${ui.mode === 'practice' ? '' : '/' + ui.mode}?${q}`);
+  }
+
+  // Show the current array's size in the size picker, adding it if it is unusual.
+  function syncSize() {
+    if (!ui.size) return;
+    const n = Array.isArray(ui.input) ? ui.input.length : ui.input.values.length;
+    const opts = [...new Set([...ui.algo.input.options, n])].sort((x, y) => x - y);
+    ui.size.innerHTML = opts.map((o) => `<option value="${o}"${o === n ? ' selected' : ''}>${o}</option>`).join('');
+    ui.sizeValue = n;
   }
 
   // Switch modes, keeping the same input so "watch, then try it" uses one array.
-  function setMode(mode, { replaceUrl = true } = {}) {
+  function setMode(mode) {
     ui.mode = mode;
     document.title = `${ui.algo.name} · ${MODES[mode].label} · Be the Algorithm`;
     app.querySelectorAll('.modes button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
@@ -476,12 +593,13 @@
       gradingHelp(mode) +
       '<p class="scale"><span><b>A</b> 90%+</span><span><b>B</b> 80%+</span><span><b>C</b> 70%+</span><span><b>D</b> 60%+</span><span><b>F</b> below</span></p>' +
       '<p class="scale-foot">Within each band the top scores get a + and the bottom scores a −.</p>';
-    if (replaceUrl) history.replaceState(null, '', `#/${ui.algo.id}${mode === 'practice' ? '' : '/' + mode}`);
+    syncUrl();
     start();
   }
 
   function newInput() {
     ui.input = ui.algo.generate(ui.sizeValue);
+    syncUrl();
     start();
   }
 
@@ -514,8 +632,173 @@
     lesson = null;
   }
 
+  // ---------- the Code panel ----------
+
+  const LANG_KEY = 'bta-lang';
+  function savedLang() {
+    try {
+      const l = localStorage.getItem(LANG_KEY);
+      return l && (l === 'pseudo' || BTA.LANGS.some((x) => x.id === l)) ? l : 'pseudo';
+    } catch {
+      return 'pseudo';
+    }
+  }
+  function saveLang(l) {
+    try {
+      localStorage.setItem(LANG_KEY, l);
+    } catch {
+      /* not remembered */
+    }
+  }
+
+  // Code lines with their comments set in a quieter colour.
+  function codeHtml(text, comment) {
+    if (!text) return ' ';
+    const at = comment ? text.indexOf(comment) : -1;
+    return at < 0 ? esc(text) : `${esc(text.slice(0, at))}<span class="cm">${esc(text.slice(at))}</span>`;
+  }
+
+  function renderCode() {
+    const impl = BTA.getImpl(ui.algo.id);
+    const lang = ui.lang !== 'pseudo' && impl && impl[ui.lang] ? ui.lang : 'pseudo';
+    const info = BTA.LANGS.find((l) => l.id === lang);
+    ui.codeLines = lang === 'pseudo' ? ui.algo.code.map((text, i) => ({ text, tags: [i] })) : impl[lang];
+    ui.code.className = `code lang-${lang}`;
+    ui.code.innerHTML = ui.codeLines
+      .map((l) => `<li class="ln" data-tags="${l.tags.join(' ')}"><code>${codeHtml(l.text, info && info.comment)}</code></li>`)
+      .join('');
+    app.querySelectorAll('.langs button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+    ui.codeBox.scrollTop = 0;
+    highlightLine(ui.line);
+  }
+
+  // Highlight the code lines for a pseudocode line, and scroll the code box (never the page) to them.
   function highlightLine(line) {
-    ui.code.querySelectorAll('.ln').forEach((n) => n.classList.toggle('hl', Number(n.dataset.line) === line));
+    ui.line = line;
+    let first = null;
+    ui.code.querySelectorAll('.ln').forEach((n) => {
+      const on = line != null && n.dataset.tags.split(' ').includes(String(line));
+      n.classList.toggle('hl', on);
+      if (on && !first) first = n;
+    });
+    const box = ui.codeBox;
+    if (first && box.scrollHeight > box.clientHeight) {
+      const top = first.offsetTop;
+      if (top < box.scrollTop || top + first.offsetHeight > box.scrollTop + box.clientHeight) {
+        box.scrollTo({ top: Math.max(0, top - box.clientHeight / 3), behavior: 'smooth' });
+      }
+    }
+  }
+
+  // ---------- sharing and typing in arrays ----------
+
+  async function copyText(text, btn) {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // Older browsers, or no permission: fall back to a hidden text box.
+      const t = document.createElement('textarea');
+      t.value = text;
+      t.setAttribute('readonly', '');
+      t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.append(t);
+      t.select();
+      try {
+        ok = document.execCommand('copy');
+      } catch {
+        ok = false;
+      }
+      t.remove();
+    }
+    const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+    btn.textContent = ok ? 'Copied' : 'Couldn’t copy';
+    setTimeout(() => {
+      if (btn.isConnected) btn.textContent = label;
+    }, 1600);
+  }
+
+  const copyLink = (btn) => copyText(location.href, btn);
+
+  /*
+   * The "Your own array" form.
+   *   rules  – from BTA.inputRules
+   *   fill() → { a, t } to start the fields with
+   *   parse(URLSearchParams) → { input } or { error }
+   *   onUse(input)
+   */
+  function ownInputForm({ rules, noun, note, fill, parse, onUse }) {
+    const [lo, hi] = rules.range;
+    const [min, max] = rules.length;
+    const form = document.createElement('form');
+    form.className = 'own';
+    form.hidden = true;
+    form.noValidate = true;
+    form.innerHTML = `
+      <div class="own-fields">
+        <label class="own-field own-a">Your ${noun}
+          <input name="a" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="8 3 5 1" />
+        </label>
+        ${
+          rules.target
+            ? `<label class="own-field own-t">Target
+                <input name="t" type="text" inputmode="numeric" autocomplete="off" placeholder="5" />
+              </label>`
+            : ''
+        }
+        <button class="btn primary" type="submit">Use it</button>
+        <button class="btn quiet" type="button" data-cancel>Cancel</button>
+      </div>
+      <p class="own-help">
+        Whole numbers from ${lo} to ${hi}${rules.distinct ? ', all different' : ''}, ${min} to ${max} of them,
+        with spaces or commas in between. ${note || ''}
+      </p>
+      <p class="own-error" role="alert"></p>`;
+    const err = form.querySelector('.own-error');
+    let opener = null;
+
+    const close = () => {
+      form.hidden = true;
+      if (opener) {
+        opener.setAttribute('aria-expanded', 'false');
+        opener.focus();
+      }
+    };
+    form.querySelector('[data-cancel]').addEventListener('click', close);
+    form.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close();
+    });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const p = new URLSearchParams();
+      p.set('a', form.elements.a.value);
+      if (rules.target) p.set('t', form.elements.t.value);
+      const r = parse(p);
+      if (r.error) {
+        err.textContent = r.error;
+        return;
+      }
+      err.textContent = '';
+      close();
+      onUse(r.input);
+    });
+
+    return {
+      form,
+      toggle(btn) {
+        opener = btn;
+        if (!form.hidden) return close();
+        const v = fill();
+        form.elements.a.value = v.a;
+        if (rules.target) form.elements.t.value = v.t;
+        err.textContent = '';
+        form.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        form.elements.a.focus();
+        form.elements.a.select();
+      },
+    };
   }
 
   // What the right answer is, in words ("8 and 3", "position 4", "Swap").

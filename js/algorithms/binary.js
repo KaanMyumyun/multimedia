@@ -8,7 +8,7 @@
     group: 'Searching',
     blurb: 'Find a value in a sorted array by halving the search range each step.',
     complexity: { best: 'O(1)', average: 'O(log n)', worst: 'O(log n)', space: 'O(1)', stable: '—' },
-    input: { label: 'Size', options: [7, 9, 11, 13, 15], default: 11 },
+    input: { label: 'Size', options: [7, 9, 11, 13, 15], default: 11, target: true, sorted: true },
     how: [
       'This only works on a <b>sorted</b> array.',
       'Look at the middle element of the current range.',

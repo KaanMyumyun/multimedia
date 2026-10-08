@@ -187,5 +187,32 @@
         ],
       };
     },
+    trace(values) {
+      const a = values.slice();
+      const ev = [];
+      const qs = (lo, hi) => {
+        if (lo >= hi) return;
+        const pivot = a[hi];
+        let i = lo;
+        for (let j = lo; j < hi; j++) {
+          ev.push(['c', j, hi]);
+          if (a[j] < pivot) {
+            if (i !== j) {
+              [a[i], a[j]] = [a[j], a[i]];
+              ev.push(['s', i, j]);
+            }
+            i++;
+          }
+        }
+        if (i !== hi) {
+          [a[i], a[hi]] = [a[hi], a[i]];
+          ev.push(['s', i, hi]);
+        }
+        qs(lo, i - 1);
+        qs(i + 1, hi);
+      };
+      qs(0, a.length - 1);
+      return ev;
+    },
   });
 })();

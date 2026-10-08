@@ -109,5 +109,22 @@
         ],
       };
     },
+    trace(values) {
+      const a = values.slice();
+      const n = a.length;
+      const ev = [];
+      for (let i = 0; i < n - 1; i++) {
+        let m = i;
+        for (let j = i + 1; j < n; j++) {
+          ev.push(['c', j, m]);
+          if (a[j] < a[m]) m = j;
+        }
+        if (m !== i) {
+          [a[i], a[m]] = [a[m], a[i]];
+          ev.push(['s', i, m]);
+        }
+      }
+      return ev;
+    },
   });
 })();

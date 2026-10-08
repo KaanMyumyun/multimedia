@@ -198,5 +198,30 @@
         ],
       };
     },
+    trace(values) {
+      const a = values.slice();
+      const ev = [];
+      const sort = (lo, hi) => {
+        if (lo >= hi) return;
+        const mid = Math.floor((lo + hi) / 2);
+        sort(lo, mid);
+        sort(mid + 1, hi);
+        const L = a.slice(lo, mid + 1);
+        const R = a.slice(mid + 1, hi + 1);
+        let i = 0;
+        let j = 0;
+        let k = lo;
+        while (i < L.length && j < R.length) {
+          ev.push(['c', lo + i, mid + 1 + j]);
+          a[k] = L[i] < R[j] ? L[i++] : R[j++];
+          ev.push(['w', k, a[k]]);
+          k++;
+        }
+        while (i < L.length) ev.push(['w', k, (a[k++] = L[i++])]);
+        while (j < R.length) ev.push(['w', k, (a[k++] = R[j++])]);
+      };
+      sort(0, a.length - 1);
+      return ev;
+    },
   });
 })();
