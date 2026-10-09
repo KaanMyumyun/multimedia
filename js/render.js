@@ -126,7 +126,7 @@
         ),
       ),
     );
-    return el('div', { class: 'buckets-wrap' }, b.label ? el('div', { class: 'row-label' }, b.label) : null, el('div', { class: 'buckets' }, ...cols));
+    return el('div', { class: 'buckets-wrap' }, b.label ? el('div', { class: 'row-label' }, b.label) : null, el('div', { class: 'buckets', style: `--cols:${cols.length}` }, ...cols));
   }
 
   function arrayRow(row, height) {

@@ -90,6 +90,18 @@
           `${Math.min(...values)} to ${Math.max(...values)}, so it only wins when the values sit in a small range.`,
       );
     }
+    const radix = by('radix');
+    if (radix) {
+      // Like its trace: negative values are shifted up first, then one pass per digit of the largest.
+      const shift = Math.min(0, ...values);
+      const passes = String(Math.max(...values) - shift).length;
+      const digits = ['ones', 'tens', 'hundreds', 'thousands'].slice(0, passes);
+      out.push(
+        `Radix Sort made no comparisons either. It made ${passes === 1 ? 'one pass, on the ones digit' : `${passes} passes, one per digit: the ${BTA.list(digits)}`}. ` +
+          `Each pass reads all ${n} values, steps through the 10 buckets and writes the ${n} values back, ${2 * n + 10} steps a pass.` +
+          (shift < 0 ? ` The values were shifted up by ${-shift} first, so the negative ones had digits to sort by too.` : ''),
+      );
+    }
     return out;
   }
 
@@ -342,7 +354,7 @@
                <div class="choices race-choices">${sorts
                  .map(
                    (a, i) =>
-                     `<button class="choice" type="button" data-guess="${a.id}" aria-pressed="${a.id === st.guess}"><span class="bubble" aria-hidden="true">${'ABCDEFGH'[i]}</span><span>${a.name}</span></button>`,
+                     `<button class="choice" type="button" data-guess="${a.id}" aria-pressed="${a.id === st.guess}"><span class="bubble" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span>${a.name}</span></button>`,
                  )
                  .join('')}</div>
                <p class="instr">${guessName ? `Your guess: ${guessName}. ` : ''}Pick one, or just start the race.</p>`
@@ -421,6 +433,8 @@
         verdict = g.place === 1 ? `You called it! ${won}` : `You picked ${g.name}. It came ${ordinal(g.place)}. ${won}`;
       }
       const table = rows.slice().sort((x, y) => x.place - y.place);
+      // The sorts whose traces have steps that are neither comparisons nor moves.
+      const extraSteps = st.lanes.filter((L) => L.events.some(([op]) => op === 'r' || op === 'k')).map((L) => L.algo.name);
 
       desk.innerHTML = `
         <div class="desk-top">
@@ -446,7 +460,7 @@
               .join('')}</tbody>
           </table>
         </div>
-        <p class="race-foot">Total steps also count reads and counter steps that are neither comparisons nor moves (only Counting Sort has these).</p>
+        <p class="race-foot">Total steps also count reads and counter steps that are neither comparisons nor moves (only ${BTA.list(extraSteps)} ${extraSteps.length === 1 ? 'has' : 'have'} these).</p>
 
         <div class="recap">
           <h3>Why it came out this way</h3>

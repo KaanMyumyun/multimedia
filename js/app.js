@@ -43,7 +43,12 @@
       ],
     },
   ];
-  const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+  // Part numbers: 1 → I, 4 → IV, 9 → IX …
+  const roman = (n) =>
+    [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']].reduce((out, [v, r]) => {
+      for (; n >= v; n -= v) out += r;
+      return out;
+    }, '');
 
   // Every algorithm in reading order: for "Next" links, the report card and the daily challenge.
   const algos = BOOKS.flatMap((b) => b.parts.flatMap((p) => p.ids)).map((id) => BTA.get(id));
@@ -58,7 +63,7 @@
       for (const [i, part] of book.parts.entries()) {
         for (const id of part.ids) {
           chapter++;
-          if (id === a.id) return { book, part, partNo: ROMAN[i], chapter: String(chapter).padStart(2, '0') };
+          if (id === a.id) return { book, part, partNo: roman(i + 1), chapter: String(chapter).padStart(2, '0') };
         }
       }
     }
@@ -353,7 +358,7 @@
         .map(
           (p, i) => `
         <section class="part">
-          <h2 class="part-title"><span class="part-no">Part ${ROMAN[i]}</span> ${p.title}</h2>
+          <h2 class="part-title"><span class="part-no">Part ${roman(i + 1)}</span> ${p.title}</h2>
           <ol class="chapters">${p.ids.map((id) => chapter(BTA.get(id))).join('')}</ol>
         </section>`,
         )
@@ -981,7 +986,7 @@
         ${
           rules.text
             ? field('s', 'Text', 'own-a', 'ABABCABAB') + field('p', 'Pattern', 'own-t', 'ABAB')
-            : field('a', `Your ${noun}`, 'own-a', '8 -3 5 1') + (rules.target ? field('t', 'Target', 'own-t', '5') : '')
+            : field('a', `Your ${noun}`, 'own-a', lo < 0 ? '8 -3 5 1' : '8 3 5 1') + (rules.target ? field('t', 'Target', 'own-t', '5') : '')
         }
         <button class="btn primary" type="submit">Use it</button>
         <button class="btn quiet" type="button" data-cancel>Cancel</button>
@@ -1400,7 +1405,7 @@
       ui.answers.innerHTML = `<div class="choices">${a.options
         .map(
           (o, i) =>
-            `<button class="choice" type="button" data-value="${esc(o.value)}"><span class="bubble" aria-hidden="true">${'ABCDEFGH'[i]}</span><span>${esc(o.label)}</span></button>`,
+            `<button class="choice" type="button" data-value="${esc(o.value)}"><span class="bubble" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span>${esc(o.label)}</span></button>`,
         )
         .join('')}</div>`;
       ui.answers.querySelectorAll('.choice').forEach((b) => b.addEventListener('click', () => onChoice(b)));
@@ -1857,7 +1862,8 @@
     }
 
     if (st && st.ask.type === 'choice' && !session.answered) {
-      const i = /^[1-8]$/.test(e.key) ? Number(e.key) - 1 : 'abcdefgh'.indexOf(e.key.toLowerCase());
+      // 1, 2, 3 … or the letter on the button: a, b, c …
+      const i = /^[1-9]$/.test(e.key) ? Number(e.key) - 1 : /^[a-z]$/i.test(e.key) ? e.key.toLowerCase().charCodeAt(0) - 97 : -1;
       const b = i >= 0 ? ui.answers.querySelectorAll('.choice')[i] : null;
       if (b && !b.disabled) b.click();
     }
