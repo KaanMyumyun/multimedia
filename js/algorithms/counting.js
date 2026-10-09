@@ -11,7 +11,14 @@
     group: 'Sorting',
     blurb: 'Count how many times each value appears, then write the values out in order.',
     complexity: { best: 'O(n + k)', average: 'O(n + k)', worst: 'O(n + k)', space: 'O(k)', stable: '—' },
-    input: { label: 'Size', options: [6, 7, 8, 9, 10], default: 8, range: [0, K - 1], distinct: false },
+    input: {
+      label: 'Size',
+      options: [6, 7, 8, 9, 10],
+      default: 8,
+      range: [0, K - 1],
+      rangeWhy: `Counting sort uses each value as the number of its counter, so values must be whole numbers from 0 to ${K - 1}: there is no counter number −1.`,
+      distinct: false,
+    },
     how: [
       `Counting sort never compares two elements. It only works on whole numbers in a small range: here 0 to ${K - 1}, so there are k = ${K} possible values.`,
       'Make a counter for every possible value, all starting at 0.',
@@ -33,6 +40,10 @@
       ['part', 'Written out'],
       ['dim', 'Counter used up'],
     ],
+    kinds: {
+      count: 'Which counter goes up',
+      write: 'Which value is written next',
+    },
     summary:
       'Counting sort read every element once and then walked through the k counters once, so it is O(n + k), with no comparisons at all. ' +
       'That beats the O(n log n) limit for comparison sorts, but only because the values are small whole numbers. ' +
@@ -99,6 +110,7 @@
         count[x]++;
         steps.push({
           line: 2,
+          kind: 'count',
           view: before,
           prompt:
             i === 0
@@ -137,6 +149,7 @@
 
         steps.push({
           line: 4,
+          kind: 'write',
           view: before,
           prompt:
             idx === 0

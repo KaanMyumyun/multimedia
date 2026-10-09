@@ -4,6 +4,7 @@
 
   const absentStep = (line, view, prompt, correct, t) => ({
     line,
+    kind: 'absent',
     view,
     prompt,
     ask: {
@@ -48,6 +49,13 @@
       ['dim', 'Ruled out'],
       ['found', 'Found'],
     ],
+    kinds: {
+      block: 'Working out the block size',
+      probe: 'Which element is checked',
+      decide: 'Jump on, or scan this block',
+      scan: 'Scanning a block',
+      absent: 'When to give up',
+    },
     summary:
       'Jump search skipped through the sorted array a block at a time, so it only checked one element per block. ' +
       'Once a block’s last element was at least the target, it scanned just that block. ' +
@@ -98,6 +106,7 @@
 
       steps.push({
         line: 0,
+        kind: 'block',
         view: view(),
         prompt: `Jump search moves in blocks of ⌊√n⌋ elements. This array has n = ${n}. How big is each block?`,
         ask: { type: 'choice', answer: String(m), options: opts.map((x) => ({ label: String(x), value: String(x) })) },
@@ -116,11 +125,12 @@
 
         steps.push({
           line: 1,
+          kind: 'probe',
           view: view(),
           prompt:
             S === 0
               ? `Find <b>${t}</b>. Click the first element jump search checks.`
-              : 'Click the element jump search checks next.',
+              : `Click the element jump search checks next. The next block starts at position ${S}.`,
           ask: { type: 'pick', answer: [String(end)] },
           hint: `It checks the <b>last</b> element of the block of ${m} that starts at position ${S}.`,
           correct: `Right. Position ${end} is the end of the block ${S}–${end}, and it holds <b>${v}</b>.`,
@@ -150,6 +160,7 @@
           const last = start >= n;
           steps.push({
             line: 2,
+            kind: 'decide',
             view: before,
             prompt,
             ask: ask('jump'),
@@ -178,6 +189,7 @@
         hi = end;
         steps.push({
           line: 4,
+          kind: 'decide',
           view: before,
           prompt,
           ask: ask('scan'),
@@ -206,6 +218,7 @@
 
           steps.push({
             line: answer === 'found' ? 5 : answer === 'absent' ? 6 : 4,
+            kind: 'scan',
             view: before,
             prompt: `Scanning: position ${i} holds <b>${x}</b>. The target is <b>${t}</b>. What now?`,
             ask: {

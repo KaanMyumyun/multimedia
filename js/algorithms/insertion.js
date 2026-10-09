@@ -28,6 +28,10 @@
       ['key', 'Key being inserted'],
       ['sorted', 'Finished'],
     ],
+    kinds: {
+      next: 'Picking up the next element',
+      place: 'Where the key lands',
+    },
     summary:
       'The left part was always sorted, and each round inserted one more element into it. Bigger elements shifted right to make room. ' +
       'A nearly-sorted array needs very few shifts, so Insertion Sort runs close to O(n) there. ' +
@@ -63,6 +67,7 @@
 
         steps.push({
           line: 1,
+          kind: 'next',
           view: view(i - 1),
           prompt:
             i === 1
@@ -84,6 +89,7 @@
 
         steps.push({
           line: 3,
+          kind: 'place',
           view: before,
           prompt: `Where does <b>${key}</b> belong in the sorted part? Click the position it will end up in.`,
           ask: { type: 'pick', answer: [String(pos)], position: true },

@@ -28,6 +28,15 @@
       ['dim', 'Ruled out'],
       ['found', 'Found'],
     ],
+    kinds: {
+      first: 'Checking position 0',
+      next: 'The next position to check',
+      decide: 'Double again, or stop',
+      range: 'The range to search',
+      middle: 'Finding the middle',
+      direction: 'Left, right or found',
+      absent: 'When to give up',
+    },
     summary:
       'Exponential search first found a stretch that must contain the target by doubling its step: 1, 2, 4, 8, … ' +
       'If the target sits at position i, that takes about log₂ i checks, and the binary search afterwards takes about log₂ i more. ' +
@@ -70,6 +79,7 @@
 
       const absent = (prompt, correct) => ({
         line: 5,
+        kind: 'absent',
         view: view({ range: true }),
         prompt,
         ask: {
@@ -91,6 +101,7 @@
       const hit0 = v[0] === t;
       steps.push({
         line: 0,
+        kind: 'first',
         view: view({ at: 0 }),
         prompt: `Find <b>${t}</b>. Exponential search first checks position 0, which holds <b>${v[0]}</b>. What now?`,
         ask: {
@@ -118,8 +129,9 @@
         const P = prev;
         steps.push({
           line: 2,
+          kind: 'next',
           view: view(),
-          prompt: 'Click the next position exponential search checks.',
+          prompt: `Click the next position exponential search checks. The last one it checked was position ${P}.`,
           ask: { type: 'pick', answer: [String(i)], position: true },
           hint: 'The position doubles every time: 1, 2, 4, 8, 16, …',
           correct: `Right. Position ${i} holds <b>${x}</b>.`,
@@ -137,6 +149,7 @@
         if (again) lo = i;
         steps.push({
           line: again ? 3 : 4,
+          kind: 'decide',
           view: before,
           prompt: `Position ${i} holds <b>${x}</b>, and the target is <b>${t}</b>. What now?`,
           ask: {
@@ -174,10 +187,13 @@
         if (x < y && !opts.includes(r)) opts.push(r);
       });
       if (!opts.includes(range)) opts.unshift(range);
+      // A short array may leave no other sensible range, so offer the next doubling as a wrong one.
+      if (opts.length < 2) opts.push(`${i}–${2 * i}`);
       opts.sort((p, q) => parseInt(p, 10) - parseInt(q, 10) || parseInt(p.split('–')[1], 10) - parseInt(q.split('–')[1], 10));
 
       steps.push({
         line: 4,
+        kind: 'range',
         view: view(),
         prompt: `Which positions does the binary search cover now? (The last position checked was ${i < n ? i : `${i}, past the end`}.)`,
         ask: {
@@ -208,6 +224,7 @@
 
         steps.push({
           line: 5,
+          kind: 'middle',
           view: view({ range: true }),
           prompt: `Binary search, positions <b>${lo}</b> to <b>${hi}</b>. Click the middle element.`,
           ask: { type: 'pick', answer: [String(mid)] },
@@ -240,6 +257,7 @@
 
         steps.push({
           line: 5,
+          kind: 'direction',
           view: before,
           prompt: `The middle value is <b>${mv}</b> and the target is <b>${t}</b>. What now?`,
           ask: {

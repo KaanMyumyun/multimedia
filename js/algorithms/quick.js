@@ -32,6 +32,11 @@
       ['dim', 'Outside the current range'],
       ['sorted', 'In its final place'],
     ],
+    kinds: {
+      pivot: 'Picking the pivot',
+      smaller: 'Finding the smaller elements',
+      place: 'Where the pivot lands',
+    },
     summary:
       'Each partition put one pivot in its final place, with smaller values on its left and bigger values on its right. Each side was then sorted on its own. ' +
       'With balanced splits there are about log₂ n levels of O(n) work, which gives O(n log n). ' +
@@ -78,6 +83,7 @@
 
         steps.push({
           line: 2,
+          kind: 'pivot',
           view: view(lo, hi),
           prompt: `Partition positions <b>${lo}–${hi}</b>. Click the pivot.`,
           ask: { type: 'pick', answer: [String(hi)] },
@@ -111,6 +117,7 @@
 
         steps.push({
           line: 4,
+          kind: 'smaller',
           view: beforeMulti,
           prompt: `Select every element in this range that is <b>smaller than ${pv}</b>, then press Check.`,
           ask: { type: 'multi', answer: less.map(String) },
@@ -156,6 +163,7 @@
 
         steps.push({
           line: 6,
+          kind: 'place',
           view: beforePivot,
           prompt: `Where does the pivot <b>${pv}</b> go? Click its final position.`,
           ask: { type: 'pick', answer: [String(p)], position: true },

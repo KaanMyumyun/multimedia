@@ -47,6 +47,11 @@
       ['dim', 'Ruled out'],
       ['found', 'Found'],
     ],
+    kinds: {
+      probe: 'Where to probe',
+      direction: 'Left, right or found',
+      absent: 'When to give up',
+    },
     summary:
       'Interpolation search used the target’s value to guess its position, so on evenly spread data it often lands right next to it. ' +
       'On uniform data that averages O(log log n) probes, far fewer than binary search. ' +
@@ -103,6 +108,7 @@
 
         steps.push({
           line: 2,
+          kind: 'probe',
           view: view(),
           prompt:
             `Range ${lo}–${hi}: values ${v[lo]} to ${v[hi]}. The target <b>${t}</b> is about ${share}% of the way through those values. ` +
@@ -138,6 +144,7 @@
 
         steps.push({
           line: pv === t ? 4 : t > pv ? 5 : 6,
+          kind: 'direction',
           view: before,
           prompt: `The probe found <b>${pv}</b>. The target is <b>${t}</b>. What now?`,
           ask: {
@@ -173,6 +180,7 @@
         lo = n;
         steps.push({
           line: 7,
+          kind: 'absent',
           view: prev,
           prompt: `Now ${why}. What does that mean?`,
           ask: {

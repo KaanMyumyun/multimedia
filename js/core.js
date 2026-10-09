@@ -3,11 +3,13 @@
  *
  * An algorithm module calls BTA.register({...}) with:
  *   id, name, group, blurb, complexity, how[], code[], legend[], summary
+ *   kinds    – { kind: 'Readable name' } for the kinds of question it asks (see `kind` below)
  *   input    – array exercises: { label, options[], default } for the size picker, plus
  *              rules for typed-in arrays (see inputRules): length, range, distinct,
- *              sorted (sort what was typed), target (a search: the input is { values, target })
- *   graph    – graph exercises instead of input: { weighted?, directed? }
- *   validate(input) → optional extra check for a graph from a link; an error message or null
+ *              sorted (sort what was typed), target (a search: the input is { values, target }),
+ *              or text: true for a text search (the input is { text, pattern })
+ *   graph    – graph exercises instead of input: { weighted?, directed?, negative? }
+ *   validate(input) → optional extra check for a graph from a link or the editor; an error or null
  *   generate(size) → a fresh random input
  *   build(input)   → { steps[], final (view), stats[[label, value]] }
  *   trace(values)  → sorts only: the operations for the race page, as
@@ -27,6 +29,9 @@
  *   hint     – HTML
  *   after    – optional view shown once the answer is correct (animated)
  *   line     – index into code[] to highlight
+ *   kind     – which kind of question this is (a key of the algorithm's `kinds`); every
+ *              question has one. Fast-forward and drills group questions by it, so it
+ *              must not depend on the answer.
  *
  * Closures in `wrong` run later, after build() has finished mutating its data,
  * so they must only use values captured at the time the step was created.
@@ -47,6 +52,34 @@
   });
 
   // ---------- randomness ----------
+
+  // A repeatable random number generator from any text (mulberry32 over a string hash),
+  // so that, for example, everyone gets the same daily challenge.
+  BTA.seeded = (text) => {
+    let h = 1779033703 ^ String(text).length;
+    for (const ch of String(text)) {
+      h = Math.imul(h ^ ch.charCodeAt(0), 3432918353);
+      h = (h << 13) | (h >>> 19);
+    }
+    let a = h >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+
+  // Run fn with Math.random replaced by rng, so everything it generates is repeatable.
+  BTA.withRandom = (rng, fn) => {
+    const saved = Math.random;
+    Math.random = rng;
+    try {
+      return fn();
+    } finally {
+      Math.random = saved;
+    }
+  };
 
   BTA.randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 
@@ -85,32 +118,52 @@
   // ---------- typed-in and linked inputs ----------
 
   // The rules an exercise's typed-in array must follow.
+  //   rangeWhy – optional reason the range is narrower than usual, shown with the rules
   BTA.inputRules = (algo) => {
     const i = algo.input || {};
     return {
       length: i.length || (i.target ? [2, 25] : [2, 12]),
-      range: i.range || [0, 99],
+      range: i.range || [-99, 99],
+      why: i.rangeWhy || '',
       distinct: i.distinct !== false,
       sorted: !!i.sorted,
       target: !!i.target,
+      text: !!i.text,
+      textLength: i.textLength || [4, 20],
+      patternLength: i.patternLength || [2, 6],
     };
   };
 
-  // "8, 3 5" → { values: [8, 3, 5] }, or { error }.
+  // Letters only, made upper case: "ab ab" → "ABAB". Returns { value } or { error }.
+  const letters = (raw, name, [min, max]) => {
+    const t = String(raw || '').replace(/\s+/g, '').toUpperCase();
+    if (!t) return { error: `Type the ${name}.` };
+    if (!/^[A-Z]+$/.test(t)) return { error: `The ${name} can only use the letters A to Z.` };
+    if (t.length < min || t.length > max) return { error: `The ${name} needs ${min} to ${max} letters.` };
+    return { value: t };
+  };
+
+  // "-3", "−3" (a real minus sign, from copy and paste) or "12" → a number; anything else → null.
+  const wholeNumber = (text) => {
+    const t = String(text).trim().replace(/^[−–]/, '-');
+    return /^-?\d+$/.test(t) ? Number(t) || 0 : null; // "|| 0" turns -0 into 0
+  };
+
+  // "8, -3 5" → { values: [8, -3, 5] }, or { error }.
   BTA.parseNumbers = (text) => {
     const parts = String(text).trim().split(/[\s,;]+/).filter(Boolean);
     if (!parts.length) return { error: 'Type some numbers, for example 8 3 5 1.' };
-    const bad = parts.find((p) => !/^\d+$/.test(p));
-    if (bad) return { error: `“${bad}” isn’t a whole number from 0 up.` };
-    return { values: parts.map(Number) };
+    const bad = parts.find((p) => wholeNumber(p) == null);
+    if (bad) return { error: `“${bad}” isn’t a whole number.` };
+    return { values: parts.map(wholeNumber) };
   };
 
   // An error message, or null if the values follow the rules.
-  BTA.checkValues = (values, { length: [min, max], range: [lo, hi], distinct }) => {
+  BTA.checkValues = (values, { length: [min, max], range: [lo, hi], why, distinct }) => {
     if (values.length < min) return `Use at least ${min} numbers.`;
     if (values.length > max) return `Use at most ${max} numbers.`;
     const out = values.find((v) => v < lo || v > hi);
-    if (out != null) return `${out} is out of range. Use numbers from ${lo} to ${hi}.`;
+    if (out != null) return `${out} is out of range. Use numbers from ${lo} to ${hi}.${why ? ' ' + why : ''}`;
     if (distinct) {
       const seen = new Set();
       for (const v of values) {
@@ -121,9 +174,11 @@
     return null;
   };
 
-  // An exercise's input as link parameters: a=8,3,5 · t=5 (search target) · e=AB3,AC5 (graph edges).
+  // An exercise's input as link parameters: a=8,3,5 · t=5 (search target) · e=AB3,AC5 (graph edges)
+  // · s=ABABC&p=ABC (text search).
   BTA.toParams = (algo, input) => {
     if (algo.graph) return { e: input.edges.map((e) => e.u + e.v + (e.w == null ? '' : e.w)).join(',') };
+    if (BTA.inputRules(algo).text) return { s: input.text, p: input.pattern };
     if (BTA.inputRules(algo).target) return { a: input.values.join(','), t: String(input.target) };
     return { a: input.join(',') };
   };
@@ -137,18 +192,89 @@
       return err ? { error: err } : { input: r.graph };
     }
     const rules = BTA.inputRules(algo);
+    if (rules.text) {
+      const text = letters(params.get('s'), 'text', rules.textLength);
+      if (text.error) return text;
+      const pattern = letters(params.get('p'), 'pattern', rules.patternLength);
+      if (pattern.error) return pattern;
+      if (pattern.value.length > text.value.length) return { error: 'The pattern can’t be longer than the text.' };
+      return { input: { text: text.value, pattern: pattern.value } };
+    }
     const r = BTA.parseNumbers(params.get('a') || '');
     if (r.error) return r;
     const err = BTA.checkValues(r.values, rules);
     if (err) return { error: err };
     const values = rules.sorted ? r.values.slice().sort((x, y) => x - y) : r.values;
     if (!rules.target) return { input: values };
-    const t = String(params.get('t') || '').trim();
-    if (!/^\d+$/.test(t) || +t > rules.range[1]) {
+    const t = wholeNumber(params.get('t') || '');
+    if (t == null || t < rules.range[0] || t > rules.range[1]) {
       return { error: `The target has to be a whole number from ${rules.range[0]} to ${rules.range[1]}.` };
     }
-    return { input: { values, target: Number(t) } };
+    return { input: { values, target: t } };
   };
+
+  // ---------- describing answers ----------
+
+  // What a question's right answer is, in words ("8 and 3", "position 4", "Swap").
+  BTA.answerLabel = (st) => {
+    const a = st.ask;
+    if (a.type === 'choice') return a.options.find((o) => o.value === a.answer).label;
+    if (!a.answer.length) return 'none of them';
+    const v = st.view;
+    if (v.kind === 'graph') return BTA.list(a.answer);
+    if (a.position) return BTA.list(a.answer.map((k) => `position ${k}`));
+    const valueOf = (k) => {
+      for (const r of v.rows) for (const c of r.cells) if (c && !c.ghost && c.key === k) return c.value;
+      for (const col of (v.buckets && v.buckets.cols) || []) if (col.key === k) return `bucket ${col.title}`;
+      return k;
+    };
+    if (a.answer.length === 1 && /^\d+$/.test(a.answer[0])) return `${valueOf(a.answer[0])} (position ${a.answer[0]})`;
+    return BTA.list(a.answer.map(valueOf));
+  };
+
+  // ---------- drills and quizzes ----------
+
+  // Up to `count` questions of one kind, taken from fresh random exercises (at most two from
+  // each, so no single array dominates). Each question keeps its own view, so it stands alone.
+  BTA.drillSteps = (algo, kind, count = 10) => {
+    const out = [];
+    const sizes = algo.input ? algo.input.options : [null];
+    for (let tries = 0; tries < 300 && out.length < count; tries++) {
+      const run = algo.build(algo.generate(sizes[BTA.randInt(0, sizes.length - 1)]));
+      const pool = BTA.shuffle(run.steps.filter((s) => s.kind === kind));
+      out.push(...pool.slice(0, Math.min(2, count - out.length)));
+    }
+    return out;
+  };
+
+  const quizzes = {};
+
+  /*
+   * Concept questions for an algorithm's Quiz mode:
+   *   [{ q: 'HTML question', options: ['A', 'B', …], answer: index of the right option, why: 'HTML explanation' }]
+   */
+  BTA.quiz = (id, questions) => {
+    quizzes[id] = questions;
+  };
+  BTA.getQuiz = (id) => quizzes[id] || [];
+
+  // Quiz questions as steps for the question engine, with the options in a fresh order.
+  BTA.quizSteps = (id) =>
+    BTA.getQuiz(id).map((item, n) => ({
+      kind: 'quiz',
+      line: null,
+      view: null,
+      prompt: item.q,
+      ask: {
+        type: 'choice',
+        answer: String(item.answer),
+        options: BTA.shuffle(item.options.map((label, i) => ({ label, value: String(i) }))),
+      },
+      correct: `Right. ${item.why}`,
+      wrong: 'Not quite.',
+      hint: null,
+      n,
+    }));
 
   // ---------- text ----------
 
@@ -162,6 +288,15 @@
   BTA.plural = (n, one, many) => (n === 1 ? one : many);
 
   // ---------- array views ----------
+
+  // Bar heights, as a percentage from `floor` to 100. With nothing negative a bar is
+  // proportional to its value; otherwise bars are measured up from the smallest value,
+  // so negative numbers still get bars that put them in order.
+  BTA.barHeight = (min, max, floor = 8) => {
+    const lo = Math.min(0, min);
+    const span = max - lo;
+    return (v) => (span > 0 ? Math.min(100, Math.max(floor, Math.round(((v - lo) / span) * 100))) : floor);
+  };
 
   // Items carry a stable id so the renderer can animate them as they move.
   BTA.items = (values) => values.map((v, i) => ({ id: 'e' + i, v }));
@@ -223,6 +358,7 @@
   };
 
   const allowed = new Set(LAYOUT.edges.map(([u, v]) => u + v));
+  BTA.LAYOUT = LAYOUT;
 
   // A graph from a list of { u, v, w } edges, drawn on the fixed layout.
   BTA.makeGraph = (edges, { directed = false } = {}) =>
@@ -236,10 +372,11 @@
     });
 
   // "AB3,AC5" → { graph } or { error }. Edges must be ones the layout can draw.
-  BTA.decodeGraph = (text, { weighted = false, directed = false } = {}) => {
+  // With negative: true, weights may be negative too ("AB-3"); 0 is never a weight.
+  BTA.decodeGraph = (text, { weighted = false, directed = false, negative = false } = {}) => {
     const tokens = String(text).split(',').map((t) => t.trim()).filter(Boolean);
     if (!tokens.length) return { error: 'The link has no edges in it.' };
-    const shape = weighted ? /^([A-G])([A-G])([1-9])$/ : /^([A-G])([A-G])$/;
+    const shape = !weighted ? /^([A-G])([A-G])$/ : negative ? /^([A-G])([A-G])(-?[1-9])$/ : /^([A-G])([A-G])([1-9])$/;
     const seen = new Set();
     const edges = [];
     for (const t of tokens) {
@@ -266,9 +403,6 @@
       }
     }
     if (reach.size < g.ids.length) return { error: 'Some nodes aren’t connected to the rest of the graph.' };
-    if (directed && BTA.topoOrder(g).length < g.ids.length) {
-      return { error: 'The arrows go round in a circle, so there is no valid order.' };
-    }
     return { graph: g };
   };
 
@@ -312,6 +446,9 @@
     return BTA.makeGraph(edges);
   };
 
+  // The straight-line length of a layout edge, in layout units.
+  BTA.edgeLength = (u, v) => Math.hypot(LAYOUT.nodes[u][0] - LAYOUT.nodes[v][0], LAYOUT.nodes[u][1] - LAYOUT.nodes[v][1]);
+
   // A random connected graph with no cycles, its edges turned into arrows.
   BTA.randomDag = ({ extra = 3 } = {}) => {
     const g = BTA.randomGraph({ extra });
@@ -339,6 +476,7 @@
    *   state  – fn(id) → node state
    *   badge  – fn(id) → small label next to the node (e.g. a distance), or null
    *   badgeName – what the badge means, for screen readers (default "distance")
+   *   note   – fn(id) → a second, smaller label beside the node (A*'s estimates), or null
    *   edge   – fn(edge) → edge state
    *   lists  – [{ title, note, items: [ids] }] queues, stacks, visit orders
    *   table  – { head: [...], rows: [[...]] }
@@ -357,6 +495,7 @@
       y: g.pos[id][1],
       state: o.state ? o.state(id) : 'idle',
       badge: o.badge ? o.badge(id) : null,
+      note: o.note ? o.note(id) : null,
     })),
     edges: g.edges.map((e) => ({ ...e, state: o.edge ? o.edge(e) : 'idle' })),
     lists: (o.lists || []).map((l) => ({ ...l, items: l.items.slice() })),

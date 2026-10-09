@@ -36,6 +36,10 @@
       ['key', 'Key being inserted'],
       ['sorted', 'Finished'],
     ],
+    kinds: {
+      gap: 'Working out the gap',
+      place: 'Where the key lands',
+    },
     summary:
       'Each pass was an insertion sort on elements a fixed gap apart. The early, wide gaps moved far-off elements most of the way in a few jumps, ' +
       'so the final gap-1 pass (plain insertion sort) had little left to do. ' +
@@ -69,6 +73,7 @@
 
         steps.push({
           line: gi === 0 ? 0 : 7,
+          kind: 'gap',
           view: view(),
           prompt:
             gi === 0
@@ -104,6 +109,7 @@
 
           steps.push({
             line: 4,
+            kind: 'place',
             view: before,
             prompt:
               gap === 1

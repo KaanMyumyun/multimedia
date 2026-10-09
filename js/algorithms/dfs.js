@@ -28,6 +28,9 @@
       ['done', 'Finished: nothing left to explore'],
       ['tree', 'Edge DFS travelled along'],
     ],
+    kinds: {
+      next: 'Which node DFS visits next',
+    },
     summary:
       'DFS followed one path as far as it could. Only when it got stuck did it backtrack along the stack to the most recent node with an unexplored neighbour. ' +
       'Like BFS it handles each node and edge once, so it runs in O(V + E). It uses a stack (or recursion) instead of a queue. ' +
@@ -89,6 +92,7 @@
 
         steps.push({
           line: 4,
+          kind: 'next',
           view: before,
           prompt:
             (order.length === 2 ? `DFS starts at <b>${start}</b>. ` : `DFS is at <b>${from}</b>. `) +

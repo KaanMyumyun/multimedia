@@ -9,6 +9,7 @@
     blurb: 'Put the nodes of a graph in order, so that every arrow points forward.',
     complexity: { best: 'O(V + E)', average: 'O(V + E)', worst: 'O(V + E)', space: 'O(V)', stable: '—' },
     graph: { directed: true },
+    validate: (g) => (BTA.topoOrder(g).length < g.ids.length ? 'The arrows go round in a circle, so there is no valid order.' : null),
     how: [
       'The graph has arrows and no cycles. Think of tasks: an arrow A → B means A has to happen before B.',
       'A node’s in-degree is how many arrows point into it. A node with in-degree 0 has nothing left to wait for, so it is ready.',
@@ -31,6 +32,10 @@
       ['visited', 'Placed in the order'],
       ['gone-edge', 'Arrow removed'],
     ],
+    kinds: {
+      pick: 'Which node goes next',
+      ready: 'Which nodes become ready',
+    },
     summary:
       'Kahn’s algorithm only ever placed a node once everything pointing into it was already placed, so every arrow points forward in the final order. ' +
       'Each node and each arrow was handled once: O(V + E). ' +
@@ -84,6 +89,7 @@
 
         steps.push({
           line: 3,
+          kind: 'pick',
           view: before,
           prompt: first ? 'Which node goes first in the order?' : 'Which node goes next in the order?',
           ask: { type: 'pick', answer: [u] },
@@ -118,6 +124,7 @@
 
         steps.push({
           line: 7,
+          kind: 'ready',
           view: before2,
           prompt:
             `Remove ${u}’s ${plural(targets.length, 'arrow', 'arrows')} to ${list(targets)}. ` +

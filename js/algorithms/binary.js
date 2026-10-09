@@ -32,6 +32,11 @@
       ['dim', 'Ruled out'],
       ['found', 'Found'],
     ],
+    kinds: {
+      middle: 'Finding the middle',
+      direction: 'Left, right or found',
+      absent: 'When to give up',
+    },
     summary:
       'Every comparison halved the range that could still contain the target. ' +
       'An array of n elements can only be halved about log₂ n times, so even a million sorted values need at most 20 comparisons. ' +
@@ -89,6 +94,7 @@
 
         steps.push({
           line: 2,
+          kind: 'middle',
           view: view(),
           prompt: `Search range: positions <b>${lo}</b> to <b>${hi}</b>. Click the <b>middle</b> element.`,
           ask: { type: 'pick', answer: [String(mid)] },
@@ -123,6 +129,7 @@
 
         steps.push({
           line: mv === t ? 3 : t > mv ? 5 : 7,
+          kind: 'direction',
           view: before,
           prompt: `The middle value is <b>${mv}</b> and the target is <b>${t}</b>. What now?`,
           ask: {
@@ -152,6 +159,7 @@
       if (foundAt < 0) {
         steps.push({
           line: 9,
+          kind: 'absent',
           view: view(),
           prompt: `Now lo = ${lo} and hi = ${hi}, so lo > hi and the search range is <b>empty</b>. What does that mean?`,
           ask: {

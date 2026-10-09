@@ -51,6 +51,10 @@
       ['active-edge', 'Edge being relaxed'],
       ['tree', 'Shortest-path edge'],
     ],
+    kinds: {
+      pick: 'Finding the closest node',
+      relax: 'Updating a distance',
+    },
     summary:
       'Dijkstra always finalized the closest unfinished node next. Because weights are never negative, no later route could beat it. ' +
       'Relaxing that node’s edges then improved the tentative distances of its neighbours. ' +
@@ -110,6 +114,7 @@
 
         steps.push({
           line: 2,
+          kind: 'pick',
           view: before,
           prompt: firstPick
             ? `Every distance starts at ∞, except the start node A, which is 0. Which node does Dijkstra finalize first?`
@@ -152,6 +157,7 @@
 
           steps.push({
             line: 5,
+            kind: 'relax',
             view: before,
             prompt:
               `Relax edge <b>${u}–${v}</b> (weight ${w}). dist[${u}] = ${du} and dist[${v}] = ${fmt(dv)}. ` +

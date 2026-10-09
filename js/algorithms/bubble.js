@@ -28,6 +28,11 @@
       ['active', 'Being compared'],
       ['sorted', 'In its final place'],
     ],
+    kinds: {
+      first: 'Where each pass starts',
+      swap: 'Swap or keep',
+      stop: 'Stopping early',
+    },
     summary:
       'Every pass compared neighbours and carried the largest remaining value to the end, so after k passes the last k elements were final. ' +
       'In the worst case that is about n²/2 comparisons, which is why Bubble Sort is rarely used on large data. ' +
@@ -62,6 +67,7 @@
             const limit = sortedFrom;
             steps.push({
               line: 2,
+              kind: 'first',
               view: view(),
               prompt: `<b>Pass ${pass + 1}.</b> Click the first two elements Bubble Sort compares.`,
               ask: { type: 'pick', count: 2, answer: ['0', '1'] },
@@ -102,6 +108,7 @@
 
           steps.push({
             line: 3,
+            kind: 'swap',
             view: before,
             prompt: `Compare <b>${x}</b> and <b>${y}</b>. Swap them or keep them?`,
             ask: {
@@ -129,6 +136,7 @@
           sortedFrom = 0;
           steps.push({
             line: 6,
+            kind: 'stop',
             view: before,
             prompt: `Pass ${pass + 1} finished without a single swap. What does that tell you?`,
             ask: {

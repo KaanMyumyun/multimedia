@@ -31,6 +31,9 @@
       ['active', 'Front of a half'],
       ['part', 'Merged'],
     ],
+    kinds: {
+      take: 'Which front element goes next',
+    },
     summary:
       'The array was split until every piece held one element. The pieces were then merged pairwise, always taking the smaller front element. ' +
       'There are about log₂ n levels of merging and each level touches all n elements, so Merge Sort is O(n log n) in every case. ' +
@@ -154,6 +157,7 @@
 
           steps.push({
             line: 6,
+            kind: 'take',
             view: before,
             prompt: first
               ? `Merge the sorted halves <b>[${Lv.join(', ')}]</b> and <b>[${Rv.join(', ')}]</b>. Which element goes into the merged list first?`

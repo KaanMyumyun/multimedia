@@ -32,6 +32,10 @@
       ['active', 'Its children'],
       ['sorted', 'In its final place'],
     ],
+    kinds: {
+      sift: 'Sifting down',
+      root: 'What moves to the end',
+    },
     summary:
       'First you turned the array into a max-heap by sifting parents down. Then you repeatedly swapped the root (the maximum) to the end and repaired the heap. ' +
       'The heap is about log₂ n levels tall, so each repair costs O(log n), which gives O(n log n) overall, even in the worst case. ' +
@@ -82,6 +86,7 @@
 
           steps.push({
             line: 6,
+            kind: 'sift',
             view: before,
             prompt:
               `${phase === 'build' ? 'Build the heap. ' : ''}Sift <b>${v}</b> down: compare it with its ${childWord} ` +
@@ -138,6 +143,7 @@
 
         steps.push({
           line: 3,
+          kind: 'root',
           view: before,
           prompt: `Which element moves to position ${end}, the end of the heap?`,
           ask: { type: 'pick', answer: ['0'] },

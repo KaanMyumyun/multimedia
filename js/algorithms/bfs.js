@@ -30,6 +30,10 @@
       ['visited', 'Visited'],
       ['tree', 'Edge used to discover a node'],
     ],
+    kinds: {
+      dequeue: 'Which node leaves the queue',
+      enqueue: 'Which neighbours join the queue',
+    },
     summary:
       'BFS spread out from the start like a ripple. First it visited every node one edge away, then two edges away, and so on. That order comes from the queue: first in, first out. ' +
       'Each node and each edge is handled once, so BFS runs in O(V + E). ' +
@@ -70,6 +74,7 @@
           order.push(u);
           steps.push({
             line: 3,
+            kind: 'dequeue',
             view: before,
             prompt: 'Which node comes out of the queue next?',
             ask: { type: 'pick', answer: [u] },
@@ -101,6 +106,7 @@
 
         steps.push({
           line: 5,
+          kind: 'enqueue',
           view: before,
           prompt:
             (first ? `BFS starts at <b>${start}</b>. ` : '') +

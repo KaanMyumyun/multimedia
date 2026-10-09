@@ -18,7 +18,7 @@
     ['normal', 'Normal', 110],
     ['fast', 'Fast', 35],
   ];
-  const RULES = { length: [2, 16], range: [0, 99], distinct: true, sorted: false, target: false };
+  const RULES = { length: [2, 16], range: [-99, 99], why: '', distinct: true, sorted: false, target: false };
 
   const ordinal = (k) => {
     const t = k % 100;
@@ -43,6 +43,9 @@
     while (isSorted(r));
     return r;
   }
+
+  // The growth chart builds its arrays the same way.
+  BTA.raceValues = makeValues;
 
   function checkTyped(params) {
     const r = BTA.parseNumbers(params.get('a') || '');
@@ -123,6 +126,7 @@
           <p class="crumb"><a href="#/">Sorting</a><span aria-hidden="true">/</span>Race</p>
           <h1>Sort race</h1>
           <p class="blurb">Every sort gets the same array and takes one step per tick: a comparison, a move or a count. The fewest steps finishes first.</p>
+          ${kit.tabs('race')}
         </header>
 
         <div class="toolbar">
@@ -198,7 +202,7 @@
       stop();
       st.phase = 'ready';
       st.tick = 0;
-      const max = Math.max(...st.values, 1);
+      const scale = BTA.barHeight(Math.min(...st.values), Math.max(...st.values), 6);
       st.lanes = sorts.map((algo) => ({
         algo,
         events: algo.trace(st.values),
@@ -215,7 +219,7 @@
           <li class="lane" data-id="${L.algo.id}">
             <span class="lane-name"><a href="#/${L.algo.id}">${L.algo.name}</a><span class="lane-guess">your guess</span></span>
             <span class="lane-bars" aria-hidden="true">${L.a
-              .map((v) => `<span class="lb" style="--h:${Math.max(6, Math.round((v / max) * 100))}%"></span>`)
+              .map((v) => `<span class="lb" style="--h:${scale(v)}%"></span>`)
               .join('')}</span>
             <span class="lane-stats"><b class="l-cmp">0</b> comparisons · <b class="l-mov">0</b> moves</span>
             <span class="lane-place" aria-live="polite"></span>
@@ -228,14 +232,14 @@
         L.cmpEl = L.el.querySelector('.l-cmp');
         L.movEl = L.el.querySelector('.l-mov');
         L.placeEl = L.el.querySelector('.lane-place');
-        L.max = max;
+        L.scale = scale;
       });
       markGuess();
       syncControls();
       renderDesk();
     }
 
-    const height = (L, v) => `${Math.max(6, Math.round((v / L.max) * 100))}%`;
+    const height = (L, v) => `${L.scale(v)}%`;
 
     function apply(L, e) {
       for (const i of L.hl) L.bars[i].classList.remove('cmp', 'mov');

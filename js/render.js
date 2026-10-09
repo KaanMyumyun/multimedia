@@ -82,31 +82,58 @@
 
   // ---------- arrays ----------
 
-  function cellNode(c, max, index) {
+  // Cells: { value, state, key, flip }, or { ghost } for an empty slot, or { spacer } for an
+  // invisible one (to line rows up). Letters get no bar.
+  function cellNode(c, height, index) {
+    if (c && c.spacer) return el('div', { class: 'cell spacer', 'aria-hidden': 'true' });
     if (!c || c.ghost) return el('div', { class: 'cell ghost', 'aria-hidden': 'true' });
     const clickable = c.key != null;
-    const h = max > 0 ? Math.min(100, Math.max(8, Math.round((c.value / max) * 100))) : 8;
+    const numeric = typeof c.value === 'number';
     const node = el(
       clickable ? 'button' : 'div',
       {
-        class: `cell s-${c.state}` + (c.lifted ? ' lifted' : ''),
+        class: `cell s-${c.state}` + (c.lifted ? ' lifted' : '') + (numeric ? '' : ' letter'),
         'data-flip': c.flip,
         'data-key': clickable ? c.key : null,
         type: clickable ? 'button' : null,
         'aria-label': clickable ? `${c.value}, position ${index}` : null,
-        style: `--h:${h}%`,
+        style: numeric ? `--h:${height(c.value)}%` : null,
       },
-      el('span', { class: 'bar', 'aria-hidden': 'true' }),
+      numeric ? el('span', { class: 'bar', 'aria-hidden': 'true' }) : null,
       el('span', { class: 'val' }, String(c.value)),
     );
     return node;
   }
 
-  function arrayRow(row, max) {
+  // Buckets (radix sort): a row of columns, each a clickable bucket holding a stack of tiles.
+  function bucketRow(b, height) {
+    const cols = b.cols.map((col) =>
+      el(
+        col.key != null ? 'button' : 'div',
+        {
+          class: `bucket s-${col.state || 'idle'}`,
+          'data-key': col.key,
+          type: col.key != null ? 'button' : null,
+          'aria-label': `Bucket ${col.title}` + (col.cells.length ? `, holding ${col.cells.map((t) => t.value).join(', ')}` : ', empty'),
+        },
+        el('span', { class: 'bucket-digit' }, col.title),
+        el(
+          'span',
+          { class: 'bucket-items' },
+          ...col.cells.map((t) =>
+            el('span', { class: `btile s-${t.state || 'idle'}`, 'data-flip': t.flip, style: `--h:${height(t.value)}%` }, String(t.value)),
+          ),
+        ),
+      ),
+    );
+    return el('div', { class: 'buckets-wrap' }, b.label ? el('div', { class: 'row-label' }, b.label) : null, el('div', { class: 'buckets' }, ...cols));
+  }
+
+  function arrayRow(row, height) {
     const track = el('div', { class: 'track', style: `--n:${row.cells.length}` });
     row.cells.forEach((c, i) => {
-      const slot = el('div', { class: 'slot' }, cellNode(c, max, i));
-      if (row.showIndex) slot.append(el('span', { class: 'idx' }, String(i)));
+      const slot = el('div', { class: 'slot' }, cellNode(c, height, i));
+      if (row.showIndex && !(c && c.spacer)) slot.append(el('span', { class: 'idx' }, String(i)));
       const tags = row.ptrs && row.ptrs[i];
       if (tags && tags.length) slot.append(el('span', { class: 'ptrs' }, ...tags.map((t) => el('span', { class: 'ptr' }, t))));
       track.append(slot);
@@ -167,9 +194,16 @@
     const c = chips(view.chips);
     if (c) wrap.append(c);
     if (view.tree != null) wrap.append(heapTree(view));
-    const rows = el('div', { class: 'rows' });
-    view.rows.forEach((r) => rows.append(arrayRow(r, view.max)));
+    // Every row shares one scale, so equal values get equal bars everywhere.
+    let min = 0;
+    const cells = view.rows.flatMap((r) => r.cells).concat(view.buckets ? view.buckets.cols.flatMap((c) => c.cells) : []);
+    for (const c of cells) if (c && typeof c.value === 'number' && c.value < min) min = c.value;
+    const height = BTA.barHeight(min, view.max);
+    // aligned: rows that must stay lined up slot for slot (text search) never wrap; they scroll together.
+    const rows = el('div', { class: 'rows' + (view.aligned ? ' aligned' : '') });
+    view.rows.forEach((r) => rows.append(arrayRow(r, height)));
     wrap.append(rows);
+    if (view.buckets) wrap.append(bucketRow(view.buckets, height));
     return wrap;
   }
 
@@ -245,14 +279,11 @@
     }
     const SIDES = [-45, -135, 45, 135, -90, 90, 0, 180].map((d) => (d * Math.PI) / 180);
     const gap = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
-    const badgeSide = (id) =>
-      SIDES.reduce(
-        (best, s) => {
-          const clear = Math.min(Math.PI, ...edgeAngles[id].map((t) => gap(s, t)));
-          return clear > best.clear + 0.01 ? { s, clear } : best;
-        },
-        { s: SIDES[0], clear: -1 },
-      ).s;
+    // The sides of a node, clearest first (ties keep the order of SIDES).
+    const sidesFor = (id) =>
+      SIDES.map((s, i) => ({ s, i, clear: Math.min(Math.PI, ...edgeAngles[id].map((t) => gap(s, t))) }))
+        .sort((a, b) => b.clear - a.clear || a.i - b.i)
+        .map((x) => x.s);
 
     for (const n of view.nodes) {
       const [x, y] = at[n.id];
@@ -269,8 +300,16 @@
         svg('circle', { class: 'disc', cx: x, cy: y, r: 26 }),
         svg('text', { x, y }, n.id),
       );
+      const sides = sidesFor(n.id);
+      if (n.note != null) {
+        // A second label (A*'s estimates) on the clearest side well away from the badge.
+        const side = sides.find((s) => n.badge == null || gap(s, sides[0]) >= Math.PI / 2 - 0.01) || sides[1];
+        const nx = x + 44 * Math.cos(side);
+        const ny = y + 44 * Math.sin(side);
+        g.append(svg('text', { class: 'gnote', x: nx, y: ny }, n.note));
+      }
       if (n.badge != null) {
-        const side = badgeSide(n.id);
+        const side = sides[0];
         const bx = x + 39 * Math.cos(side);
         const by = y + 39 * Math.sin(side);
         const wide = n.badge.length > 1;
@@ -324,9 +363,10 @@
 
   // ---------- public ----------
 
-  BTA.render = function (stage, view, { animate = true } = {}) {
+  // narrow: force the graph layout (true = turned on its side); by default it follows the width.
+  BTA.render = function (stage, view, { animate = true, narrow: force } = {}) {
     const before = animate ? capture(stage) : new Map();
-    const narrow = stage.clientWidth < 560;
+    const narrow = force != null ? force : stage.clientWidth < 560;
     stage.replaceChildren(view.kind === 'graph' ? graphStage(view, narrow) : arrayStage(view));
     stage.btaView = view;
     stage.btaNarrow = narrow;

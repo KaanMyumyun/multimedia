@@ -26,6 +26,11 @@
       ['dim', 'Already checked'],
       ['found', 'Found'],
     ],
+    kinds: {
+      start: 'Where the search starts',
+      check: 'Found it, or check the next one',
+      absent: 'When to give up',
+    },
     summary:
       'Linear search checked the elements one by one. It needs no preparation and works on unsorted data, ' +
       'but in the worst case it looks at all n elements, so it is O(n). ' +
@@ -53,6 +58,7 @@
 
       steps.push({
         line: 0,
+        kind: 'start',
         view: view(),
         prompt: `Find <b>${t}</b>. Click the element linear search checks first.`,
         ask: { type: 'pick', answer: ['0'] },
@@ -69,6 +75,7 @@
         comparisons++;
         steps.push({
           line: 1,
+          kind: 'check',
           view: view({ at: i, checked: i }),
           prompt: `Position ${i} holds <b>${v}</b>. The target is <b>${t}</b>. What now?`,
           ask: {
@@ -95,6 +102,7 @@
       if (foundAt < 0) {
         steps.push({
           line: 3,
+          kind: 'absent',
           view: view({ checked: n }),
           prompt: `Linear search has checked all ${n} elements. What does that mean?`,
           ask: {

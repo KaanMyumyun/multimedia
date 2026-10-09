@@ -1,10 +1,15 @@
 /*
- * App: routing, the contents page, the report card, and the play page.
+ * App: routing, the book pages, the report card, and the play page.
  *
- * The play page has three modes:
+ * The play page has these modes:
  *   learn    – a lesson player that steps through a worked example and explains each move
  *   practice – you make every move; hints and retries are allowed for partial credit
  *   test     – one attempt per question and no hints; graded A+ to F
+ *   quiz     – concept questions about the algorithm (quizzes.js), one attempt each
+ *   drill    – ten questions of one kind from fresh exercises (#/bubble/drill?k=swap)
+ *   daily    – the daily challenge (#/daily), under test rules
+ * In practice and test, fast-forward lets the rest of a kind of question play by itself
+ * once you get three of that kind right first time in a row. Those aren't graded.
  */
 (function () {
   'use strict';
@@ -18,27 +23,29 @@
       id: 'sorting',
       href: '#/',
       title: 'Sorting',
-      blurb: 'Bubble, selection, insertion, shell, merge, quick, heap and counting sort, then topological sort for graphs.',
+      blurb: 'Bubble, selection, insertion, shell, merge, quick, heap, counting and radix sort, then topological sort for graphs.',
       parts: [
         { title: 'Simple sorts', ids: ['bubble', 'selection', 'insertion'] },
         { title: 'Efficient sorts', ids: ['shell', 'merge', 'quick', 'heap'] },
-        { title: 'Special-purpose sorts', ids: ['counting', 'topo'] },
+        { title: 'Special-purpose sorts', ids: ['counting', 'radix', 'topo'] },
       ],
     },
     {
       id: 'searching',
       href: '#/searching',
       title: 'Searching',
-      blurb: 'Linear, binary, jump, interpolation and exponential search, then BFS, DFS and Dijkstra on graphs.',
+      blurb: 'Arrays, graphs and text: from linear search to Dijkstra, A*, minimum spanning trees and KMP.',
       parts: [
         { title: 'Searching an array', ids: ['linear', 'binary', 'jump', 'interpolation', 'exponential'] },
-        { title: 'Searching a graph', ids: ['bfs', 'dfs', 'dijkstra'] },
+        { title: 'Searching a graph', ids: ['bfs', 'dfs'] },
+        { title: 'Shortest paths and spanning trees', ids: ['dijkstra', 'bellman', 'astar', 'kruskal'] },
+        { title: 'Searching text', ids: ['kmp'] },
       ],
     },
   ];
   const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 
-  // Every algorithm in reading order: for "Next" links and the report card.
+  // Every algorithm in reading order: for "Next" links, the report card and the daily challenge.
   const algos = BOOKS.flatMap((b) => b.parts.flatMap((p) => p.ids)).map((id) => BTA.get(id));
 
   // The sorts that take part in the race: every array sort, in book order.
@@ -62,7 +69,12 @@
     learn: { label: 'Learn', note: 'A worked example. Step through it and read why each move is made.' },
     practice: { label: 'Practice', note: 'Make every move yourself. Hints and retries are allowed, for partial credit.' },
     test: { label: 'Test', note: 'One attempt per question, no hints. Graded A+ to F.' },
+    quiz: { label: 'Quiz', note: 'Questions about the algorithm as a whole: how fast it is, what it needs, and when to use it. One attempt each.' },
+    drill: { label: 'Drill', tab: false, note: '' },
+    daily: { label: 'Daily challenge', tab: false, note: 'One attempt per question, no hints, and the same exercise for everyone today.' },
   };
+  // Modes with one attempt per question and no hints.
+  const ONE_SHOT = new Set(['test', 'quiz', 'daily']);
 
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const textOf = (html) => html.replace(/<[^>]+>/g, '');
@@ -93,8 +105,9 @@
     later: { label: 'Three or more tries', pts: 0.25 },
     shown: { label: 'Answer shown', pts: 0 },
     wrong: { label: 'Wrong', pts: 0 },
+    auto: { label: 'Played by itself (fast-forward)', pts: null },
   };
-  const CREDIT_ROWS = { practice: ['first', 'hinted', 'second', 'later', 'shown'], test: ['first', 'wrong'] };
+  const creditRows = (mode) => (ONE_SHOT.has(mode) ? ['first', 'wrong'] : ['first', 'hinted', 'second', 'later', 'shown']);
 
   const SCALE = [
     [97, 'A+'], [93, 'A'], [90, 'A−'], [87, 'B+'], [83, 'B'], [80, 'B−'],
@@ -113,23 +126,31 @@
 
   const fraction = (x) => ({ 1: '1', 0.75: '¾', 0.5: '½', 0.25: '¼', 0: '0' })[x] ?? String(x);
 
-  // ---------- progress (this browser only, best effort) ----------
+  // ---------- saved in this browser only (best effort) ----------
+
+  const saved = (key, fallback) => {
+    try {
+      const v = localStorage.getItem(key);
+      return v == null ? fallback : JSON.parse(v);
+    } catch {
+      return fallback;
+    }
+  };
+  const save = (key, value) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* not remembered */
+    }
+  };
 
   const store = {
     key: 'bta-progress-v2',
     all() {
-      try {
-        return JSON.parse(localStorage.getItem(this.key)) || {};
-      } catch {
-        return {};
-      }
+      return saved(this.key, {}) || {};
     },
     write(all) {
-      try {
-        localStorage.setItem(this.key, JSON.stringify(all));
-      } catch {
-        /* storage unavailable: progress just isn't remembered */
-      }
+      save(this.key, all);
     },
     // Returns the previous best for this mode, or null on the first run.
     record(id, mode, pct) {
@@ -150,11 +171,31 @@
     reset() {
       try {
         localStorage.removeItem(this.key);
+        localStorage.removeItem(kindStats.key);
       } catch {
         /* nothing to reset */
       }
+      BTA.daily.reset();
     },
   };
+
+  // How often each kind of question was answered right first time: { algo: { kind: [asked, right] } }.
+  const kindStats = {
+    key: 'bta-kinds-v1',
+    all() {
+      return saved(this.key, {}) || {};
+    },
+    add(id, kind, right) {
+      const all = this.all();
+      const a = (all[id] = all[id] || {});
+      const k = (a[kind] = a[kind] || [0, 0]);
+      k[0]++;
+      if (right) k[1]++;
+      save(this.key, all);
+    },
+  };
+
+  const FF_KEY = 'bta-ff'; // fast-forward on or off
 
   const gradeTag = (rec) =>
     rec ? `<span class="grade-tag" title="Best: ${rec.best}%">${gradeOf(rec.best)}</span>` : '<span class="grade-tag none">—</span>';
@@ -190,19 +231,36 @@
     if (id === 'report') {
       reportPage();
       section = 'report';
+    } else if (id === 'daily') {
+      const key = BTA.daily.key();
+      const pick = BTA.daily.pick(key, algos);
+      playPage(pick.algo, 'daily', new URLSearchParams(), { daily: { key, input: pick.input } });
+      section = 'daily';
     } else if (id === 'race') {
-      document.title = 'Sort race · Be the Algorithm';
-      leavePage = BTA.racePage(app, {
+      const growth = mode === 'growth';
+      const kit = {
         params,
         sorts: raceSorts,
-        setUrl: (p) => history.replaceState(null, '', `#/race?${queryOf(p)}`),
+        setUrl: (p) => history.replaceState(null, '', `#/race${growth ? '/growth' : ''}?${queryOf(p)}`),
+        tabs: (active) => `
+          <nav class="subtabs" aria-label="Race pages">
+            <a href="#/race"${active === 'race' ? ' aria-current="page"' : ''}>Race</a>
+            <a href="#/race/growth"${active === 'growth' ? ' aria-current="page"' : ''}>How they grow</a>
+          </nav>`,
         ownInputForm,
         copyLink,
         esc,
-      });
+      };
+      document.title = growth ? 'How sorts grow · Be the Algorithm' : 'Sort race · Be the Algorithm';
+      leavePage = growth ? BTA.growthPage(app, kit) : BTA.racePage(app, kit);
       section = 'race';
+    } else if (algo && mode === 'sheet') {
+      worksheet(algo, params);
+      section = placeOf(algo).book.id;
     } else if (algo) {
-      playPage(algo, MODES[mode] ? mode : 'practice', params);
+      const drillOk = mode !== 'drill' || (algo.kinds && algo.kinds[params.get('k')]);
+      const quizOk = mode !== 'quiz' || BTA.getQuiz(algo.id).length;
+      playPage(algo, MODES[mode] && mode !== 'daily' && drillOk && quizOk ? mode : 'practice', params);
       section = placeOf(algo).book.id;
     } else {
       const book = BOOKS.find((b) => b.id === id) || BOOKS[0];
@@ -214,6 +272,20 @@
       else a.removeAttribute('aria-current');
     });
     window.scrollTo(0, 0);
+  }
+
+  // A printable worksheet for an exercise from a link (or a random one).
+  function worksheet(algo, params) {
+    let input = null;
+    if ([...params.keys()].length) {
+      const r = BTA.fromParams(algo, params);
+      if (!r.error) input = r.input;
+    }
+    if (!input) input = algo.generate(algo.input ? algo.input.default : null);
+    const q = queryOf(BTA.toParams(algo, input));
+    history.replaceState(null, '', `#/${algo.id}/sheet?${q}`);
+    document.title = `${algo.name} worksheet · Be the Algorithm`;
+    BTA.worksheetPage(app, algo, input, { esc, back: `#/${algo.id}?${q}` });
   }
 
   // ---------- book pages: Sorting (home) and Searching ----------
@@ -256,6 +328,7 @@
             <dt>Learn</dt><dd>Step through a worked example, with the reason for every move.</dd>
             <dt>Practice</dt><dd>Make the moves yourself. Hints and retries earn partial credit.</dd>
             <dt>Test</dt><dd>One attempt per question, no hints. Graded A+ to F.</dd>
+            <dt>Quiz</dt><dd>Questions about speed, memory and when to use each algorithm.</dd>
           </dl>
         </aside>
       </header>
@@ -265,12 +338,12 @@
         <div class="masthead-main">
           <p class="crumb"><a href="#/">Be the Algorithm</a><span aria-hidden="true">/</span>Book two</p>
           <h1 class="site-title book-title"><span class="marker">Searching</span></h1>
-          <p class="tagline">Find a value in an array, or find your way around a graph. Eight algorithms, from the obvious to the clever.</p>
+          <p class="tagline">Find a value in an array, a way around a graph, or a word in a text. ${book.parts.flatMap((p) => p.ids).length} algorithms, from the obvious to the clever.</p>
         </div>
         <aside class="how-to" aria-label="Where to start">
           <h2>Where to start</h2>
           <p>Do Linear and Binary Search first. Jump, Interpolation and Exponential Search are each a twist on one of them.</p>
-          <p>For graphs, do Breadth-First Search before Depth-First Search, then Dijkstra.</p>
+          <p>For graphs, do Breadth-First Search before Depth-First Search. Dijkstra comes next: Bellman-Ford and A* are each a twist on it.</p>
         </aside>
       </header>`;
 
@@ -285,6 +358,8 @@
         </section>`,
         )
         .join('')}
+
+      ${book.id === 'sorting' ? dailyCard() : ''}
 
       ${
         book.id === 'sorting'
@@ -307,6 +382,24 @@
       </footer>`;
   }
 
+  // The "today's challenge" card on the home page.
+  function dailyCard() {
+    const key = BTA.daily.key();
+    const { algo } = BTA.daily.pick(key, algos);
+    const done = BTA.daily.get(key);
+    const streak = BTA.daily.streak();
+    return `
+      <a class="book-link daily-link" href="#/daily">
+        <span class="book-link-label">Daily challenge · ${esc(BTA.daily.label(key))}</span>
+        <span class="book-link-title">${algo.name} <span aria-hidden="true">→</span></span>
+        <span class="book-link-blurb">${
+          done
+            ? `Done today: ${done.grade} (${done.right} of ${done.total}). Streak: ${streak} ${plural(streak, 'day', 'days')}.`
+            : `The same exercise for everyone today, under test rules.${streak ? ` Your streak: ${streak} ${plural(streak, 'day', 'days')}.` : ''}`
+        }</span>
+      </a>`;
+  }
+
   // ---------- report card ----------
 
   function reportPage() {
@@ -315,11 +408,12 @@
     const tests = algos.map((a) => progress[a.id]?.test?.best).filter((x) => x != null);
     const avg = tests.length ? Math.round(tests.reduce((s, x) => s + x, 0) / tests.length) : null;
     const learned = algos.filter((a) => progress[a.id]?.learned).length;
+    const streak = BTA.daily.streak();
 
     const pct = (m) => (m ? `<span class="rc-pct">${m.best}%</span>` : '');
     const row = (a) => {
       const r = progress[a.id] || {};
-      const runs = (r.practice?.plays || 0) + (r.test?.plays || 0);
+      const runs = (r.practice?.plays || 0) + (r.test?.plays || 0) + (r.quiz?.plays || 0);
       return `
           <tr>
             <td class="rc-no">${placeOf(a).chapter}</td>
@@ -327,14 +421,25 @@
             <td class="rc-learn">${r.learned ? '<span class="tick" aria-label="Watched">✓</span>' : '<span class="muted">—</span>'}</td>
             <td>${gradeTag(r.practice)} ${pct(r.practice)}</td>
             <td>${gradeTag(r.test)} ${pct(r.test)}</td>
+            <td>${gradeTag(r.quiz)} ${pct(r.quiz)}</td>
             <td class="rc-runs">${runs || '<span class="muted">—</span>'}</td>
           </tr>`;
     };
     const rows = BOOKS.map(
       (b) => `
-          <tr class="rc-book"><th scope="rowgroup" colspan="6"><a href="${b.href}">${b.title}</a></th></tr>
+          <tr class="rc-book"><th scope="rowgroup" colspan="7"><a href="${b.href}">${b.title}</a></th></tr>
           ${b.parts.flatMap((p) => p.ids).map((id) => row(BTA.get(id))).join('')}`,
     ).join('');
+
+    // Weak spots: the kinds of question answered right first time least often (at least 3 tries).
+    const stats = kindStats.all();
+    const weak = [];
+    for (const a of algos) {
+      for (const [kind, [n, right]] of Object.entries(stats[a.id] || {})) {
+        if (n >= 3 && right < n && a.kinds && a.kinds[kind]) weak.push({ a, kind, n, right });
+      }
+    }
+    weak.sort((x, y) => x.right / x.n - y.right / y.n || y.n - x.n);
 
     app.innerHTML = `
       <header class="page-head">
@@ -347,12 +452,34 @@
         <div><strong>${tests.length}<small>/${algos.length}</small></strong><span>tests taken</span></div>
         <div><strong>${avg == null ? '—' : gradeOf(avg)}</strong><span>average test grade${avg == null ? '' : ` (${avg}%)`}</span></div>
         <div><strong>${learned}<small>/${algos.length}</small></strong><span>lessons finished</span></div>
+        <div><strong>${streak}</strong><span><a href="#/daily">daily challenge</a> streak, in days</span></div>
       </div>
+
+      <section class="weak">
+        <h2>Weak spots</h2>
+        ${
+          weak.length
+            ? `<p class="weak-note">The kinds of question you get right first time least often. A drill gives you ten in a row.</p>
+               <ul class="types">${weak
+                 .slice(0, 6)
+                 .map(
+                   (w) => `
+                 <li>
+                   <span class="type-name">${w.a.name}: ${w.a.kinds[w.kind]}</span>
+                   <span class="type-score">${w.right}/${w.n} first time</span>
+                   <span class="type-bar" aria-hidden="true"><span style="width:${Math.round((w.right / w.n) * 100)}%"></span></span>
+                   <a class="link type-drill" href="#/${w.a.id}/drill?k=${w.kind}">Drill</a>
+                 </li>`,
+                 )
+                 .join('')}</ul>`
+            : '<p class="weak-note">Nothing yet. Weak spots show up once you have answered a kind of question at least three times.</p>'
+        }
+      </section>
 
       <div class="table-wrap">
         <table class="report">
           <thead>
-            <tr><th scope="col">Ch.</th><th scope="col">Algorithm</th><th scope="col">Lesson</th><th scope="col">Practice</th><th scope="col">Test</th><th scope="col">Runs</th></tr>
+            <tr><th scope="col">Ch.</th><th scope="col">Algorithm</th><th scope="col">Lesson</th><th scope="col">Practice</th><th scope="col">Test</th><th scope="col">Quiz</th><th scope="col">Runs</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
@@ -368,7 +495,7 @@
       <p><button class="btn quiet" id="reset" type="button">Erase all progress</button></p>`;
 
     document.getElementById('reset').addEventListener('click', () => {
-      if (window.confirm('Erase all grades and lesson progress saved in this browser?')) {
+      if (window.confirm('Erase all grades, weak spots, daily results and lesson progress saved in this browser?')) {
         store.reset();
         reportPage();
       }
@@ -376,52 +503,57 @@
   }
 
   function gradingHelp(mode) {
-    if (mode === 'test') {
-      return '<p><b>Test:</b> each question is worth 1 point if your first answer is right, and 0 otherwise.</p>';
+    if (ONE_SHOT.has(mode)) {
+      return '<p><b>Test, quiz and daily challenge:</b> each question is worth 1 point if your first answer is right, and 0 otherwise.</p>';
     }
     return (
-      '<p><b>Practice:</b> each question is worth 1 point. ' +
+      '<p><b>Practice and drills:</b> each question is worth 1 point. ' +
       'You get ¾ after a hint, ½ on the second try, ¼ after that, and 0 if you reveal the answer.</p>'
     );
   }
 
   // ---------- play page ----------
 
-  function playPage(algo, mode, params) {
-    const noun = algo.group === 'Graphs' ? 'graph' : 'array';
+  // opts.daily – { key, input } for the daily challenge
+  function playPage(algo, mode, params, opts = {}) {
+    const noun = algo.graph ? 'graph' : algo.input && algo.input.text ? 'text' : 'array';
     const cx = algo.complexity;
     const place = placeOf(algo);
     const rules = BTA.inputRules(algo);
+    const daily = opts.daily || null;
+    const hasQuiz = BTA.getQuiz(algo.id).length > 0;
 
     app.innerHTML = `
-      <div class="play">
+      <div class="play${daily ? ' is-daily' : ''}">
         <header class="page-head">
           <p class="crumb">
-            <a href="${place.book.href}">${place.book.title}</a><span aria-hidden="true">/</span>Part ${place.partNo}: ${place.part.title}<span aria-hidden="true">/</span>Chapter ${place.chapter}
+            ${
+              daily
+                ? `<a href="#/">Be the Algorithm</a><span aria-hidden="true">/</span>Daily challenge<span aria-hidden="true">/</span>${BTA.daily.label(daily.key)}`
+                : `<a href="${place.book.href}">${place.book.title}</a><span aria-hidden="true">/</span>Part ${place.partNo}: ${place.part.title}<span aria-hidden="true">/</span>Chapter ${place.chapter}`
+            }
           </p>
-          <h1>${algo.name}</h1>
+          <h1>${daily ? '<span class="daily-tag">Today’s challenge</span> ' : ''}${algo.name}</h1>
           <p class="blurb">${algo.blurb}</p>
         </header>
 
         <div class="toolbar">
-          <div class="modes" role="group" aria-label="Mode">
-            ${Object.entries(MODES)
-              .map(([k, m]) => `<button type="button" data-mode="${k}" aria-pressed="false">${m.label}</button>`)
-              .join('')}
-          </div>
-          <div class="controls">
-            ${
-              algo.input
-                ? `<label class="size">${algo.input.label}
-                    <select id="size">${algo.input.options
-                      .map((o) => `<option value="${o}"${o === algo.input.default ? ' selected' : ''}>${o}</option>`)
-                      .join('')}</select>
-                  </label>`
-                : ''
-            }
+          ${
+            daily
+              ? ''
+              : `<div class="modes" role="group" aria-label="Mode">
+                  ${Object.entries(MODES)
+                    .filter(([k, m]) => m.tab !== false && (k !== 'quiz' || hasQuiz))
+                    .map(([k, m]) => `<button type="button" data-mode="${k}" aria-pressed="false">${m.label}</button>`)
+                    .join('')}
+                </div>`
+          }
+          <div class="controls"${daily ? ' hidden' : ''}>
+            ${algo.input ? `<label class="size" id="size-wrap">${algo.input.label} <select id="size"></select></label>` : ''}
             <button class="btn" id="new" type="button">New ${noun}</button>
-            ${algo.input ? `<button class="btn" id="edit" type="button" aria-expanded="false">Your own ${noun}</button>` : ''}
+            ${algo.input || algo.graph ? `<button class="btn" id="edit" type="button" aria-expanded="false">Your own ${noun}</button>` : ''}
             <button class="btn quiet" id="share" type="button">Copy link</button>
+            <a class="btn quiet" id="sheet" href="#/">Worksheet</a>
             <button class="btn quiet" id="restart" type="button">Restart</button>
           </div>
           <p class="mode-note" id="mode-note"></p>
@@ -442,16 +574,24 @@
               <h2>How it works</h2>
               <ol class="how">${algo.how.map((h) => `<li>${h}</li>`).join('')}</ol>
             </section>
-            <section class="code-sec">
+            <section class="code-sec" id="code-sec">
               <div class="code-head">
                 <h2>Code</h2>
+                <span class="code-peek" id="code-peek" aria-hidden="true"></span>
                 <button class="link" id="copy-code" type="button">Copy</button>
+                <button class="drawer-toggle" id="drawer-toggle" type="button" aria-expanded="false" aria-controls="code-body">Show</button>
               </div>
-              <div class="langs" role="group" aria-label="Language">
-                <button type="button" data-lang="pseudo">Pseudocode</button>
-                ${BTA.LANGS.map((l) => `<button type="button" data-lang="${l.id}">${l.label}</button>`).join('')}
+              <div class="code-body" id="code-body">
+                <div class="langs" role="group" aria-label="Language">
+                  <button type="button" data-lang="pseudo">Pseudocode</button>
+                  ${BTA.LANGS.map((l) => `<button type="button" data-lang="${l.id}">${l.label}</button>`).join('')}
+                </div>
+                <div class="code-box" id="code-box"><ol class="code" id="code"></ol></div>
               </div>
-              <div class="code-box" id="code-box"><ol class="code" id="code"></ol></div>
+            </section>
+            <section id="types-sec">
+              <h2>Question types</h2>
+              <ul class="types" id="types"></ul>
             </section>
             <section>
               <h2>Key</h2>
@@ -479,18 +619,23 @@
         </div>
       </div>`;
 
+    const $ = (id) => document.getElementById(id);
     ui = {
       algo,
       noun,
       mode,
-      stage: document.getElementById('stage'),
+      daily,
+      drillKind: mode === 'drill' ? params.get('k') : null,
+      stage: $('stage'),
       stageSheet: app.querySelector('.stage-sheet'),
-      desk: document.getElementById('desk'),
-      code: document.getElementById('code'),
-      codeBox: document.getElementById('code-box'),
+      desk: $('desk'),
+      code: $('code'),
+      codeBox: $('code-box'),
+      codeSec: $('code-sec'),
+      peek: $('code-peek'),
       lang: savedLang(),
       line: null,
-      size: document.getElementById('size'),
+      size: $('size'),
       sizeValue: algo.input ? algo.input.default : null,
       input: null,
       run: null,
@@ -505,9 +650,9 @@
         if (b.dataset.mode !== ui.mode) setMode(b.dataset.mode);
       }),
     );
-    document.getElementById('new').addEventListener('click', newInput);
-    document.getElementById('restart').addEventListener('click', start);
-    document.getElementById('share').addEventListener('click', (e) => copyLink(e.currentTarget));
+    $('new').addEventListener('click', () => (ui.mode === 'drill' ? start() : newInput()));
+    $('restart').addEventListener('click', start);
+    $('share').addEventListener('click', (e) => copyLink(e.currentTarget));
     if (ui.size) {
       ui.size.addEventListener('change', () => {
         ui.sizeValue = Number(ui.size.value);
@@ -515,7 +660,7 @@
       });
     }
 
-    // Code panel
+    // Code panel; on phones it is a drawer at the bottom of the screen.
     app.querySelectorAll('.langs button').forEach((b) =>
       b.addEventListener('click', () => {
         ui.lang = b.dataset.lang;
@@ -523,76 +668,124 @@
         renderCode();
       }),
     );
-    document.getElementById('copy-code').addEventListener('click', (e) =>
-      copyText(
-        ui.codeLines.map((l) => l.text).join('\n'),
-        e.currentTarget,
-      ),
-    );
+    $('copy-code').addEventListener('click', (e) => copyText(ui.codeLines.map((l) => l.text).join('\n'), e.currentTarget));
+    $('drawer-toggle').addEventListener('click', (e) => {
+      const open = ui.codeSec.classList.toggle('open');
+      e.currentTarget.setAttribute('aria-expanded', String(open));
+      e.currentTarget.textContent = open ? 'Hide' : 'Show';
+      if (open) highlightLine(ui.line);
+    });
     renderCode();
 
-    // Typing in your own array
-    if (algo.input) {
-      const own = ownInputForm({
-        rules,
-        noun,
-        note: rules.sorted ? `${algo.name} needs a sorted array, so it will be sorted for you.` : '',
-        fill: () => (rules.target ? { a: ui.input.values.join(' '), t: ui.input.target } : { a: ui.input.join(' ') }),
-        parse: (p) => BTA.fromParams(algo, p),
-        onUse: (input) => {
-          ui.input = input;
-          syncSize();
-          start();
+    // Typing in your own array or text, or drawing your own graph
+    if (algo.input || algo.graph) {
+      const use = (input) => {
+        ui.input = input;
+        syncSize();
+        if (ui.mode !== 'learn' && ui.mode !== 'practice' && ui.mode !== 'test') setMode('practice');
+        else {
           syncUrl();
-        },
-      });
-      document.getElementById('own-slot').append(own.form);
-      document.getElementById('edit').addEventListener('click', (e) => own.toggle(e.currentTarget));
+          start();
+        }
+      };
+      const own = algo.graph
+        ? BTA.graphEditor({ algo, current: () => ui.input, onUse: use })
+        : ownInputForm({
+            rules,
+            noun,
+            note: rules.sorted ? `${algo.name} needs a sorted array, so it will be sorted for you.` : '',
+            fill: () =>
+              rules.text
+                ? { s: ui.input.text, p: ui.input.pattern }
+                : rules.target
+                  ? { a: ui.input.values.join(' '), t: ui.input.target }
+                  : { a: ui.input.join(' ') },
+            parse: (p) => BTA.fromParams(algo, p),
+            onUse: use,
+          });
+      $('own-slot').append(own.form);
+      $('edit').addEventListener('click', (e) => own.toggle(e.currentTarget));
     }
 
-    // An exercise from a link
-    if ([...params.keys()].length) {
-      const r = BTA.fromParams(algo, params);
-      if (r.error) {
-        const notice = document.getElementById('notice');
-        notice.textContent = `The ${noun} in this link couldn’t be used: ${r.error} Here is a random one instead.`;
-        notice.hidden = false;
-      } else {
-        ui.input = r.input;
+    // The exercise: today's challenge, one from a link, or a random one
+    if (daily) {
+      ui.input = daily.input;
+    } else {
+      if (mode !== 'drill' && [...params.keys()].length) {
+        const r = BTA.fromParams(algo, params);
+        if (r.error) {
+          const notice = $('notice');
+          notice.textContent = `The ${noun} in this link couldn’t be used: ${r.error} Here is a random one instead.`;
+          notice.hidden = false;
+        } else {
+          ui.input = r.input;
+        }
       }
+      if (!ui.input) ui.input = algo.generate(ui.sizeValue);
     }
-    if (!ui.input) ui.input = algo.generate(ui.sizeValue);
     syncSize();
+    renderTypes();
     setMode(mode);
   }
 
-  // The address bar always holds a link to exactly this exercise.
+  // The address bar always holds a link to exactly this exercise (and the worksheet link follows it).
   function syncUrl() {
     const q = queryOf(BTA.toParams(ui.algo, ui.input));
-    history.replaceState(null, '', `#/${ui.algo.id}${ui.mode === 'practice' ? '' : '/' + ui.mode}?${q}`);
+    const sheet = document.getElementById('sheet');
+    if (sheet) sheet.href = `#/${ui.algo.id}/sheet?${q}`;
+    let url = `#/${ui.algo.id}${ui.mode === 'practice' ? '' : '/' + ui.mode}?${q}`;
+    if (ui.mode === 'daily') url = '#/daily';
+    if (ui.mode === 'drill') url = `#/${ui.algo.id}/drill?k=${ui.drillKind}`;
+    history.replaceState(null, '', url);
   }
 
   // Show the current array's size in the size picker, adding it if it is unusual.
   function syncSize() {
     if (!ui.size) return;
-    const n = Array.isArray(ui.input) ? ui.input.length : ui.input.values.length;
+    const n = Array.isArray(ui.input) ? ui.input.length : ui.input.values ? ui.input.values.length : ui.input.text.length;
     const opts = [...new Set([...ui.algo.input.options, n])].sort((x, y) => x - y);
     ui.size.innerHTML = opts.map((o) => `<option value="${o}"${o === n ? ' selected' : ''}>${o}</option>`).join('');
     ui.sizeValue = n;
   }
 
+  // Only the controls that make sense in this mode.
+  function syncControls() {
+    const m = ui.mode;
+    const toggle = (id, on) => {
+      const n = document.getElementById(id);
+      if (n) n.hidden = !on;
+    };
+    toggle('size-wrap', !['quiz', 'drill', 'daily'].includes(m));
+    toggle('new', !['quiz', 'daily'].includes(m));
+    toggle('edit', !['quiz', 'drill', 'daily'].includes(m));
+    toggle('share', m !== 'daily');
+    toggle('sheet', !['quiz', 'drill', 'daily'].includes(m));
+    toggle('restart', m !== 'daily');
+    const nb = document.getElementById('new');
+    if (nb) nb.textContent = m === 'drill' ? 'New questions' : `New ${ui.noun}`;
+    const rb = document.getElementById('restart');
+    if (rb) rb.textContent = m === 'quiz' ? 'Retake' : 'Restart';
+    if (['quiz', 'drill', 'daily'].includes(m)) document.querySelectorAll('#own-slot form').forEach((f) => (f.hidden = true));
+    ui.stageSheet.hidden = m === 'quiz';
+  }
+
   // Switch modes, keeping the same input so "watch, then try it" uses one array.
   function setMode(mode) {
     ui.mode = mode;
-    document.title = `${ui.algo.name} · ${MODES[mode].label} · Be the Algorithm`;
+    const kindName = mode === 'drill' ? ui.algo.kinds[ui.drillKind] : null;
+    document.title = `${ui.algo.name} · ${kindName ? `Drill: ${kindName}` : MODES[mode].label} · Be the Algorithm`;
     app.querySelectorAll('.modes button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
-    document.getElementById('mode-note').textContent = MODES[mode].note;
+    document.getElementById('mode-note').innerHTML = kindName
+      ? `Drill: <b>${esc(kindName)}</b>. Ten questions of just this kind, each from a fresh ${ui.noun}. Hints and retries are allowed.`
+      : esc(MODES[mode].note);
     const grading = document.getElementById('grading');
     grading.hidden = mode === 'learn';
     document.getElementById('grading-body').innerHTML =
       gradingHelp(mode) +
+      (mode === 'practice' || mode === 'test' ? '<p>Questions that play by themselves (fast-forward) don’t count towards the grade.</p>' : '') +
       '<p class="scale"><span><b>A</b> 90%+</span><span><b>B</b> 80%+</span><span><b>C</b> 70%+</span><span><b>D</b> 60%+</span><span><b>F</b> below</span></p>' +
       '<p class="scale-foot">Within each band the top scores get a + and the bottom scores a −.</p>';
+    syncControls();
     syncUrl();
     start();
   }
@@ -605,12 +798,53 @@
 
   function start() {
     stopRun();
-    ui.run = ui.algo.build(ui.input);
-    BTA.render(ui.stage, ui.run.steps[0].view, { animate: false });
+    if (ui.mode === 'quiz') {
+      ui.run = { steps: BTA.quizSteps(ui.algo.id), final: null, stats: [] };
+    } else if (ui.mode === 'drill') {
+      const steps = BTA.drillSteps(ui.algo, ui.drillKind, 10);
+      const last = steps[steps.length - 1];
+      ui.run = { steps, final: last ? last.after || last.view : null, stats: [] };
+    } else {
+      ui.run = ui.algo.build(ui.input);
+    }
+    const first = ui.run.steps[0];
+    if (first && first.view) BTA.render(ui.stage, first.view, { animate: false });
     ui.stage.classList.remove('locked', 'pickable');
     ui.desk.className = `sheet desk desk-${ui.mode}`;
+    highlightLine(null);
+    if (ui.mode === 'daily') {
+      const done = BTA.daily.get(ui.daily.key);
+      if (done) {
+        if (ui.run.final) BTA.render(ui.stage, ui.run.final, { animate: false });
+        ui.stage.classList.add('locked');
+        return dailyDone(done);
+      }
+    }
+    if (!ui.run.steps.length) {
+      ui.desk.innerHTML = '<p class="prompt">No questions of this kind turned up. Press “New questions” to try again.</p>';
+      return;
+    }
     if (ui.mode === 'learn') startLesson();
     else startQuiz();
+  }
+
+  // The "Question types" list in the sidebar: how you do on each kind, with a drill for each.
+  function renderTypes() {
+    const list = document.getElementById('types');
+    if (!list) return;
+    const stats = kindStats.all()[ui.algo.id] || {};
+    list.innerHTML = Object.entries(ui.algo.kinds || {})
+      .map(([k, label]) => {
+        const [n, right] = stats[k] || [0, 0];
+        return `
+          <li>
+            <span class="type-name">${label}</span>
+            <span class="type-score">${n ? `${right}/${n} first time` : 'not tried yet'}</span>
+            ${n ? `<span class="type-bar" aria-hidden="true"><span style="width:${Math.round((right / n) * 100)}%"></span></span>` : ''}
+            <a class="link type-drill" href="#/${ui.algo.id}/drill?k=${k}" aria-label="Drill: ${esc(label)}">Drill</a>
+          </li>`;
+      })
+      .join('');
   }
 
   // ---------- timers ----------
@@ -673,6 +907,7 @@
   }
 
   // Highlight the code lines for a pseudocode line, and scroll the code box (never the page) to them.
+  // On phones the drawer's handle shows the highlighted line too.
   function highlightLine(line) {
     ui.line = line;
     let first = null;
@@ -681,6 +916,7 @@
       n.classList.toggle('hl', on);
       if (on && !first) first = n;
     });
+    if (ui.peek) ui.peek.textContent = first ? first.textContent.trim() : '';
     const box = ui.codeBox;
     if (first && box.scrollHeight > box.clientHeight) {
       const top = first.offsetTop;
@@ -722,37 +958,41 @@
   const copyLink = (btn) => copyText(location.href, btn);
 
   /*
-   * The "Your own array" form.
+   * The "Your own array" form (or text and pattern, for a text search).
    *   rules  – from BTA.inputRules
-   *   fill() → { a, t } to start the fields with
+   *   fill() → { a, t } or { s, p } to start the fields with
    *   parse(URLSearchParams) → { input } or { error }
    *   onUse(input)
    */
   function ownInputForm({ rules, noun, note, fill, parse, onUse }) {
     const [lo, hi] = rules.range;
     const [min, max] = rules.length;
+    const field = (name, label, cls, placeholder) => `
+      <label class="own-field ${cls}">${label}
+        <input name="${name}" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${placeholder}" />
+      </label>`;
+    const names = rules.text ? ['s', 'p'] : rules.target ? ['a', 't'] : ['a'];
     const form = document.createElement('form');
     form.className = 'own';
     form.hidden = true;
     form.noValidate = true;
     form.innerHTML = `
       <div class="own-fields">
-        <label class="own-field own-a">Your ${noun}
-          <input name="a" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="8 3 5 1" />
-        </label>
         ${
-          rules.target
-            ? `<label class="own-field own-t">Target
-                <input name="t" type="text" inputmode="numeric" autocomplete="off" placeholder="5" />
-              </label>`
-            : ''
+          rules.text
+            ? field('s', 'Text', 'own-a', 'ABABCABAB') + field('p', 'Pattern', 'own-t', 'ABAB')
+            : field('a', `Your ${noun}`, 'own-a', '8 -3 5 1') + (rules.target ? field('t', 'Target', 'own-t', '5') : '')
         }
         <button class="btn primary" type="submit">Use it</button>
         <button class="btn quiet" type="button" data-cancel>Cancel</button>
       </div>
       <p class="own-help">
-        Whole numbers from ${lo} to ${hi}${rules.distinct ? ', all different' : ''}, ${min} to ${max} of them,
-        with spaces or commas in between. ${note || ''}
+        ${
+          rules.text
+            ? `Letters A to Z: ${rules.textLength[0]} to ${rules.textLength[1]} for the text and ${rules.patternLength[0]} to ${rules.patternLength[1]} for the pattern.`
+            : `Whole numbers from ${lo} to ${hi}${rules.distinct ? ', all different' : ''}, ${min} to ${max} of them,
+               with spaces or commas in between. ${rules.why || ''}`
+        } ${note || ''}
       </p>
       <p class="own-error" role="alert"></p>`;
     const err = form.querySelector('.own-error');
@@ -772,8 +1012,7 @@
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const p = new URLSearchParams();
-      p.set('a', form.elements.a.value);
-      if (rules.target) p.set('t', form.elements.t.value);
+      for (const n of names) p.set(n, form.elements[n].value);
       const r = parse(p);
       if (r.error) {
         err.textContent = r.error;
@@ -790,31 +1029,14 @@
         opener = btn;
         if (!form.hidden) return close();
         const v = fill();
-        form.elements.a.value = v.a;
-        if (rules.target) form.elements.t.value = v.t;
+        for (const n of names) form.elements[n].value = v[n];
         err.textContent = '';
         form.hidden = false;
         btn.setAttribute('aria-expanded', 'true');
-        form.elements.a.focus();
-        form.elements.a.select();
+        form.elements[names[0]].focus();
+        form.elements[names[0]].select();
       },
     };
-  }
-
-  // What the right answer is, in words ("8 and 3", "position 4", "Swap").
-  function answerLabel(st) {
-    const a = st.ask;
-    if (a.type === 'choice') return a.options.find((o) => o.value === a.answer).label;
-    if (!a.answer.length) return 'none of them';
-    const v = st.view;
-    if (v.kind === 'graph') return BTA.list(a.answer);
-    if (a.position) return BTA.list(a.answer.map((k) => `position ${k}`));
-    const valueOf = (k) => {
-      for (const r of v.rows) for (const c of r.cells) if (c && !c.ghost && c.key === k) return c.value;
-      return k;
-    };
-    if (a.answer.length === 1 && /^\d+$/.test(a.answer[0])) return `${valueOf(a.answer[0])} (position ${a.answer[0]})`;
-    return BTA.list(a.answer.map(valueOf));
   }
 
   // ==========================================================================
@@ -952,7 +1174,7 @@
     }
     return (
       q +
-      `<p class="n-answer"><span class="n-tag">Answer</span><b>${answerLabel(st)}</b></p>` +
+      `<p class="n-answer"><span class="n-tag">Answer</span><b>${BTA.answerLabel(st)}</b></p>` +
       `<p class="n-why">${stripLead(st.correct)}</p>`
     );
   }
@@ -985,13 +1207,17 @@
   }
 
   // ==========================================================================
-  // Practice and test: the question engine
+  // Practice, test, quiz, drill and daily: the question engine
   // ==========================================================================
 
   function startQuiz() {
     const run = ui.run;
+    const mode = ui.mode;
+    const oneShot = ONE_SHOT.has(mode);
+    const canSkip = mode === 'practice' || mode === 'test';
     session = {
-      mode: ui.mode,
+      mode,
+      oneShot,
       steps: run.steps,
       total: run.steps.filter((s) => s.ask.type !== 'info').length,
       idx: -1,
@@ -1005,8 +1231,17 @@
       attempts: 0,
       hinted: false,
       answered: false,
+      // fast-forward
+      ff: canSkip && saved(FF_KEY, true) !== false,
+      kindRun: {},
+      auto: new Set(),
+      noAuto: new Set(),
+      autoCount: 0,
+      ffNote: null,
+      jumped: false,
+      // drill questions come from different arrays, so moving between them isn't animated
+      fresh: mode === 'drill',
     };
-    const test = ui.mode === 'test';
 
     ui.desk.innerHTML = `
       <div class="desk-top">
@@ -1018,8 +1253,16 @@
       <div class="hintbox" id="hintbox" hidden></div>
       <div class="feedback" id="feedback" role="status" aria-live="polite" hidden></div>
       <div class="desk-actions">
-        ${test ? '' : '<button class="link" id="hint" type="button">Hint <span class="cost">(−¼)</span></button>'}
-        ${test ? '' : '<button class="link" id="reveal" type="button" hidden>Show answer <span class="cost">(no credit)</span></button>'}
+        ${
+          canSkip
+            ? `<label class="ff-toggle" title="After three right first time in a row of one kind of question, the rest of that kind play by themselves.">
+                <input type="checkbox" id="ff"${session.ff ? ' checked' : ''} /> Fast-forward repeats
+              </label>`
+            : ''
+        }
+        ${oneShot ? '' : '<button class="link" id="hint" type="button">Hint <span class="cost">(−¼)</span></button>'}
+        ${oneShot ? '' : '<button class="link" id="reveal" type="button" hidden>Show answer <span class="cost">(no credit)</span></button>'}
+        <button class="link" id="skip" type="button" hidden>Skip to the next real question</button>
         <button class="btn primary" id="next" type="button" hidden>Continue <span aria-hidden="true">→</span></button>
       </div>`;
 
@@ -1035,12 +1278,22 @@
       feedback: $('feedback'),
       hintBtn: $('hint'),
       revealBtn: $('reveal'),
+      skipBtn: $('skip'),
       nextBtn: $('next'),
       checkBtn: null,
     });
     if (ui.hintBtn) ui.hintBtn.addEventListener('click', showHint);
     if (ui.revealBtn) ui.revealBtn.addEventListener('click', reveal);
     ui.nextBtn.addEventListener('click', advance);
+    ui.skipBtn.addEventListener('click', skipAuto);
+    const ff = $('ff');
+    if (ff) {
+      ff.addEventListener('change', () => {
+        session.ff = ff.checked;
+        save(FF_KEY, ff.checked);
+        if (!ff.checked) session.auto.clear();
+      });
+    }
 
     const s = session;
     clock = setInterval(() => {
@@ -1052,6 +1305,15 @@
 
   const current = () => session && session.steps[session.idx];
   const show = (btn, on) => btn && (btn.hidden = !on);
+  const isAuto = (st) => session.ff && st.ask.type !== 'info' && st.kind && session.auto.has(st.kind);
+
+  function markStrip(cls, title) {
+    const cell = ui.strip.children[session.asked - 1];
+    if (cell) {
+      cell.className = cls;
+      cell.title = title;
+    }
+  }
 
   function advance() {
     clearTimers();
@@ -1065,8 +1327,10 @@
     s.hinted = false;
     s.answered = false;
     if (st.ask.type !== 'info') s.asked++;
+    if (isAuto(st)) return autoStep(st);
 
-    BTA.render(ui.stage, st.view);
+    if (st.view) BTA.render(ui.stage, st.view, { animate: !s.fresh && !s.jumped });
+    s.jumped = false;
     ui.stage.classList.remove('locked');
     ui.stage.classList.toggle('pickable', st.ask.type === 'pick' || st.ask.type === 'multi');
 
@@ -1076,6 +1340,7 @@
     setFeedback(null);
     show(ui.hintBtn, !!st.hint && st.ask.type !== 'info');
     show(ui.revealBtn, false);
+    show(ui.skipBtn, false);
     show(ui.nextBtn, st.ask.type === 'info');
     highlightLine(st.line);
     updateStatus();
@@ -1085,9 +1350,50 @@
     else ui.prompt.focus({ preventScroll: true });
   }
 
+  // A question of a kind you've already shown you know: show its answer, play the move, move on.
+  function autoStep(st) {
+    const s = session;
+    s.answered = true;
+    s.autoCount++;
+    s.results.push({ idx: s.idx, kind: 'auto', pts: null });
+    markStrip('r-auto', `Question ${s.asked}: played by itself`);
+    if (st.view) BTA.render(ui.stage, st.view, { animate: !s.jumped });
+    s.jumped = false;
+    ui.stage.classList.add('locked');
+    ui.stage.classList.remove('pickable');
+    if (st.ask.type !== 'choice') BTA.mark(ui.stage, 'is-answer', st.ask.answer);
+    ui.prompt.innerHTML = st.prompt;
+    ui.answers.innerHTML = '';
+    ui.hintbox.hidden = true;
+    setFeedback('auto', `<b>${BTA.answerLabel(st)}</b>. ${stripLead(st.correct)}`);
+    show(ui.hintBtn, false);
+    show(ui.revealBtn, false);
+    show(ui.skipBtn, true);
+    show(ui.nextBtn, true);
+    highlightLine(st.line);
+    updateStatus();
+    if (st.after) later(() => BTA.render(ui.stage, st.after), 650);
+    later(advance, 1600);
+  }
+
+  // Jump past every question that would play by itself, straight to the next one to answer.
+  function skipAuto() {
+    clearTimers();
+    const s = session;
+    while (s.idx + 1 < s.steps.length && isAuto(s.steps[s.idx + 1])) {
+      s.idx++;
+      s.asked++;
+      s.autoCount++;
+      s.results.push({ idx: s.idx, kind: 'auto', pts: null });
+      markStrip('r-auto', `Question ${s.asked}: played by itself`);
+    }
+    s.jumped = true;
+    advance();
+  }
+
   function renderAnswers(st) {
     const a = st.ask;
-    const what = ui.algo.group === 'Graphs' ? 'node' : 'element';
+    const what = ui.algo.graph ? 'node' : st.view && st.view.buckets ? 'bucket' : 'element';
     ui.checkBtn = null;
 
     if (a.type === 'choice') {
@@ -1149,23 +1455,33 @@
         ? given === a.answer
         : given.length === a.answer.length && given.every((k) => a.answer.includes(k));
     if (ok) succeed();
-    else if (session.mode === 'test') failTest(given);
+    else if (session.oneShot) failTest(given);
     else fail(given);
   }
 
   // Score the current question and lock it.
   function settle(kind) {
     const s = session;
+    const st = current();
     const pts = CREDIT[kind].pts;
     s.answered = true;
     s.points += pts;
     s.results.push({ idx: s.idx, kind, pts });
     s.streak = kind === 'first' ? s.streak + 1 : 0;
     s.bestStreak = Math.max(s.bestStreak, s.streak);
+    markStrip(pts === 1 ? 'r-full' : pts > 0 ? 'r-part' : 'r-zero', `Question ${s.asked}: ${CREDIT[kind].label}`);
+    if (st.kind && st.kind !== 'quiz') kindStats.add(ui.algo.id, st.kind, kind === 'first');
 
-    const cell = ui.strip.children[s.asked - 1];
-    cell.className = pts === 1 ? 'r-full' : pts > 0 ? 'r-part' : 'r-zero';
-    cell.title = `Question ${s.asked}: ${CREDIT[kind].label}`;
+    // Fast-forward: three of a kind right first time in a row, with more of that kind to come.
+    s.ffNote = null;
+    if (s.ff && st.kind && !s.noAuto.has(st.kind) && !s.auto.has(st.kind)) {
+      s.kindRun[st.kind] = kind === 'first' ? (s.kindRun[st.kind] || 0) + 1 : 0;
+      const left = s.steps.slice(s.idx + 1).filter((x) => x.kind === st.kind).length;
+      if (s.kindRun[st.kind] >= 3 && left > 0) {
+        s.auto.add(st.kind);
+        s.ffNote = { kind: st.kind, left };
+      }
+    }
 
     ui.stage.classList.add('locked');
     show(ui.hintBtn, false);
@@ -1191,6 +1507,29 @@
     }
   }
 
+  // "Three in a row!" under the feedback, with a way to say no.
+  function ffNoteHtml() {
+    const n = session.ffNote;
+    if (!n) return '';
+    const label = esc(ui.algo.kinds[n.kind]);
+    return (
+      `<p class="ff-note"><b>Three in a row!</b> ` +
+      (n.left === 1 ? `The last “${label}” question will play by itself.` : `The other ${n.left} “${label}” questions will play by themselves.`) +
+      ` <button class="link" id="ff-keep" type="button">Keep asking me</button></p>`
+    );
+  }
+
+  function wireFfNote() {
+    const b = document.getElementById('ff-keep');
+    if (!b) return;
+    const kind = session.ffNote.kind;
+    b.addEventListener('click', () => {
+      session.auto.delete(kind);
+      session.noAuto.add(kind);
+      b.closest('.ff-note').textContent = 'OK, you’ll keep getting these.';
+    });
+  }
+
   function succeed() {
     const st = current();
     const s = session;
@@ -1198,7 +1537,8 @@
     settle(kind);
     markAnswer(st);
     const credit = kind === 'first' ? '' : `<span class="credit">+${fraction(CREDIT[kind].pts)}</span> `;
-    setFeedback(kind === 'first' ? 'ok' : 'part', credit + st.correct);
+    setFeedback(kind === 'first' ? 'ok' : 'part', credit + st.correct + ffNoteHtml());
+    wireFfNote();
     if (st.after) later(() => BTA.render(ui.stage, st.after), 380);
   }
 
@@ -1206,6 +1546,7 @@
     const st = current();
     session.attempts++;
     session.streak = 0;
+    if (st.kind) session.kindRun[st.kind] = 0;
     const msg = typeof st.wrong === 'function' ? st.wrong(given) : st.wrong || 'Not quite. Try again.';
     setFeedback('bad', msg);
 
@@ -1226,13 +1567,13 @@
     updateStatus();
   }
 
-  // Test mode: one attempt. Show what was right, then move on.
+  // One attempt only: show what was right, then move on.
   function failTest(given) {
     const st = current();
     settle('wrong');
     markAnswer(st, given);
     const msg = typeof st.wrong === 'function' ? st.wrong(given) : st.wrong;
-    setFeedback('bad', `${msg} <span class="then">The answer was <b>${answerLabel(st)}</b>. ${stripLead(st.correct)}</span>`);
+    setFeedback('bad', `${msg} <span class="then">The answer was <b>${BTA.answerLabel(st)}</b>. ${stripLead(st.correct)}</span>`);
     if (st.after) later(() => BTA.render(ui.stage, st.after), 1400);
   }
 
@@ -1241,7 +1582,7 @@
     if (!st || session.answered) return;
     settle('shown');
     markAnswer(st);
-    setFeedback('shown', `The answer is <b>${answerLabel(st)}</b>. ${stripLead(st.correct)}`);
+    setFeedback('shown', `The answer is <b>${BTA.answerLabel(st)}</b>. ${stripLead(st.correct)}`);
     if (st.after) later(() => BTA.render(ui.stage, st.after), 1000);
   }
 
@@ -1262,7 +1603,7 @@
       f.innerHTML = '';
       return;
     }
-    const mark = { ok: '✓', part: '✓', bad: '✗', shown: '→' }[kind];
+    const mark = { ok: '✓', part: '✓', bad: '✗', shown: '→', auto: '»' }[kind];
     f.className = `feedback fb-${kind}`;
     f.innerHTML = `<span class="fb-mark" aria-hidden="true">${mark}</span><div class="fb-text">${html}</div>`;
     f.hidden = false;
@@ -1271,7 +1612,7 @@
       void f.offsetWidth; // restart the animation
       f.classList.add('shake');
     }
-    if (f.getBoundingClientRect().bottom > window.innerHeight) f.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (kind !== 'auto' && f.getBoundingClientRect().bottom > window.innerHeight) f.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
   function updateStatus() {
@@ -1291,38 +1632,85 @@
     const s = session;
     const algo = ui.algo;
     const mode = s.mode;
-    BTA.render(ui.stage, ui.run.final);
+    if (ui.run.final) BTA.render(ui.stage, ui.run.final);
     ui.stage.classList.add('locked');
     ui.stage.classList.remove('pickable');
     highlightLine(null);
 
-    const pct = s.total ? Math.round((s.points / s.total) * 100) : 100;
+    const graded = s.total - s.autoCount;
+    const pct = graded ? Math.round((s.points / graded) * 100) : 100;
     const grade = gradeOf(pct);
-    const prev = store.record(algo.id, mode, pct);
+
+    if (mode === 'daily') {
+      const marks = s.results.filter((r) => r.pts !== null).map((r) => r.pts === 1);
+      const result = { id: algo.id, name: algo.name, pct, grade, right: marks.filter(Boolean).length, total: marks.length, marks };
+      BTA.daily.save(ui.daily.key, result);
+      session = null;
+      return dailyDone(result);
+    }
+
+    const prev = mode === 'drill' ? null : store.record(algo.id, mode, pct);
     const isBest = prev != null && pct > prev;
     const time = fmtTime(Date.now() - s.t0);
     const next = algos[(algos.indexOf(algo) + 1) % algos.length];
+    renderTypes();
 
     const count = (kind) => s.results.filter((r) => r.kind === kind).length;
-    const breakdown = CREDIT_ROWS[mode]
-      .map((kind) => {
-        const n = count(kind);
-        return `<tr class="${n ? '' : 'zero'}"><th scope="row">${CREDIT[kind].label}</th><td>${n}</td><td>× ${fraction(CREDIT[kind].pts)}</td><td>${+(n * CREDIT[kind].pts).toFixed(2)}</td></tr>`;
-      })
-      .join('');
+    const breakdown =
+      creditRows(mode)
+        .map((kind) => {
+          const n = count(kind);
+          return `<tr class="${n ? '' : 'zero'}"><th scope="row">${CREDIT[kind].label}</th><td>${n}</td><td>× ${fraction(CREDIT[kind].pts)}</td><td>${+(n * CREDIT[kind].pts).toFixed(2)}</td></tr>`;
+        })
+        .join('') +
+      (s.autoCount ? `<tr class="auto-row"><th scope="row">${CREDIT.auto.label}</th><td>${s.autoCount}</td><td>—</td><td>not graded</td></tr>` : '');
 
-    const missed = s.results.filter((r) => r.pts < 1);
+    const missed = s.results.filter((r) => r.pts !== null && r.pts < 1);
     const review = missed
       .map((r) => {
         const st = s.steps[r.idx];
         return `
           <li>
             <p class="r-q">${st.prompt}</p>
-            <p class="r-meta"><span class="r-how">${CREDIT[r.kind].label}</span> Answer: <b>${answerLabel(st)}</b></p>
+            <p class="r-meta"><span class="r-how">${CREDIT[r.kind].label}</span> Answer: <b>${BTA.answerLabel(st)}</b></p>
             <p class="r-why">${stripLead(st.correct)}</p>
           </li>`;
       })
       .join('');
+
+    // The kind of question missed most this time, to drill.
+    const misses = {};
+    for (const r of missed) {
+      const k = s.steps[r.idx].kind;
+      if (k && k !== 'quiz') misses[k] = (misses[k] || 0) + 1;
+    }
+    const weakest = Object.entries(misses).sort((x, y) => y[1] - x[1])[0];
+    const drillWeak = weakest && mode !== 'drill' ? weakest[0] : null;
+
+    const title = mode === 'drill' ? `Drill: ${algo.kinds[ui.drillKind]}` : `${algo.name} · ${MODES[mode].label}`;
+    let actions;
+    if (mode === 'quiz') {
+      actions = `
+        <button class="btn primary" id="again" type="button">Take the quiz again</button>
+        <button class="btn" id="to-practice" type="button">Practice ${algo.name}</button>`;
+    } else if (mode === 'drill') {
+      actions = `
+        <button class="btn primary" id="again" type="button">Ten more</button>
+        <button class="btn" id="to-practice" type="button">Back to practice</button>`;
+    } else {
+      actions = `
+        <button class="btn primary" id="again" type="button">${mode === 'test' ? 'Take another test' : 'Try a new ' + ui.noun}</button>
+        <button class="btn" id="same" type="button">Replay this ${ui.noun}</button>
+        ${
+          drillWeak
+            ? `<a class="btn" href="#/${algo.id}/drill?k=${drillWeak}">Drill: ${esc(algo.kinds[drillWeak])}</a>`
+            : pct < 80
+              ? `<button class="btn" id="to-learn" type="button">Watch the lesson</button>`
+              : mode === 'practice'
+                ? `<button class="btn" id="to-test" type="button">Take the test</button>`
+                : ''
+        }`;
+    }
 
     ui.desk.innerHTML = `
       <div class="results">
@@ -1333,15 +1721,15 @@
         </div>
         <div class="results-body">
           <p class="teacher-note">${teacherNote(pct)}${isBest ? ' New personal best.' : ''}</p>
-          <h2>${algo.name} · ${MODES[mode].label}</h2>
-          <p class="results-line">${s.total} questions · ${time} · best streak ${s.bestStreak}</p>
+          <h2>${esc(title)}</h2>
+          <p class="results-line">${graded} ${plural(graded, 'question', 'questions')} graded${s.autoCount ? ` · ${s.autoCount} played by themselves` : ''} · ${time} · best streak ${s.bestStreak}</p>
         </div>
       </div>
 
       <table class="breakdown">
         <thead><tr><th scope="col">Answered</th><th scope="col">Count</th><th scope="col">Credit</th><th scope="col">Points</th></tr></thead>
         <tbody>${breakdown}</tbody>
-        <tfoot><tr><th scope="row">Total</th><td>${s.total}</td><td></td><td>${+s.points.toFixed(2)} / ${s.total}</td></tr></tfoot>
+        <tfoot><tr><th scope="row">Total</th><td>${graded}</td><td></td><td>${+s.points.toFixed(2)} / ${graded}</td></tr></tfoot>
       </table>
 
       ${
@@ -1353,23 +1741,19 @@
           : ''
       }
 
-      <dl class="stats">${ui.run.stats.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
+      ${ui.run.stats.length ? `<dl class="stats">${ui.run.stats.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
 
-      <div class="recap">
-        <h3>What just happened</h3>
-        <p>${algo.summary}</p>
-      </div>
+      ${
+        mode === 'drill'
+          ? ''
+          : `<div class="recap">
+              <h3>${mode === 'quiz' ? 'In short' : 'What just happened'}</h3>
+              <p>${algo.summary}</p>
+            </div>`
+      }
 
       <div class="actions">
-        <button class="btn primary" id="again" type="button">${mode === 'test' ? 'Take another test' : 'Try a new ' + ui.noun}</button>
-        <button class="btn" id="same" type="button">Replay this ${ui.noun}</button>
-        ${
-          pct < 80
-            ? `<button class="btn" id="to-learn" type="button">Watch the lesson</button>`
-            : mode === 'practice'
-              ? `<button class="btn" id="to-test" type="button">Take the test</button>`
-              : ''
-        }
+        ${actions}
         <a class="btn quiet" href="#/${next.id}">Next: ${next.name} <span aria-hidden="true">→</span></a>
       </div>`;
 
@@ -1377,9 +1761,10 @@
       const b = document.getElementById(id);
       if (b) b.addEventListener('click', fn);
     };
-    on('again', newInput);
+    on('again', mode === 'quiz' || mode === 'drill' ? start : newInput);
     on('same', start);
     on('to-learn', () => setMode('learn'));
+    on('to-practice', () => setMode('practice'));
     on('to-test', () => {
       ui.input = ui.algo.generate(ui.sizeValue);
       setMode('test');
@@ -1387,6 +1772,47 @@
     document.getElementById('again').focus({ preventScroll: true });
     ui.desk.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     session = null;
+  }
+
+  // ---------- daily challenge results ----------
+
+  function dailyDone(r) {
+    const key = ui.daily.key;
+    const base = location.href.split('#')[0];
+    const text = BTA.daily.share(key, r, `${base}#/daily`);
+    const streak = BTA.daily.streak();
+    ui.desk.innerHTML = `
+      <div class="results">
+        <div class="grade-mark" role="img" aria-label="Grade ${r.grade}, ${r.pct} percent">
+          ${CIRCLE}
+          <span class="grade-letter">${r.grade}</span>
+          <span class="grade-pct">${r.pct}%</span>
+        </div>
+        <div class="results-body">
+          <p class="teacher-note">${teacherNote(r.pct)}</p>
+          <h2>Daily challenge · ${esc(BTA.daily.label(key))}</h2>
+          <p class="results-line">${esc(r.name)} · ${r.right} of ${r.total} right · streak: ${streak} ${plural(streak, 'day', 'days')}</p>
+        </div>
+      </div>
+      <section class="share">
+        <h3>Share your result</h3>
+        <pre class="share-text">${esc(text)}</pre>
+        <div class="actions">
+          <button class="btn primary" id="copy-share" type="button">Copy</button>
+          <a class="btn" href="#/${r.id}">Practice ${esc(r.name)}</a>
+        </div>
+      </section>
+      <p class="next-daily" id="next-daily"></p>`;
+    document.getElementById('copy-share').addEventListener('click', (e) => copyText(text, e.currentTarget));
+    const tick = () => {
+      const el = document.getElementById('next-daily');
+      if (!el) return clearInterval(clock);
+      const m = Math.ceil(BTA.daily.msToNext() / 60000);
+      el.textContent = `The next challenge is in ${Math.floor(m / 60)} h ${m % 60} min.`;
+    };
+    tick();
+    clearInterval(clock);
+    clock = setInterval(tick, 30000);
   }
 
   // ---------- keyboard ----------
@@ -1445,6 +1871,31 @@
       if (session && !session.answered) BTA.mark(ui.stage, 'is-selected', [...session.sel]);
     }, 150);
   });
+
+  // ---------- colour theme: follows the system unless one is picked ----------
+
+  const THEMES = { auto: 'Auto', light: 'Light', dark: 'Dark' };
+  function applyTheme(t) {
+    if (t === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = t;
+    const b = document.getElementById('theme');
+    if (b) {
+      b.dataset.theme = t;
+      b.querySelector('.theme-label').textContent = THEMES[t];
+      b.setAttribute('aria-label', `Colour theme: ${THEMES[t]}. Click to change it.`);
+    }
+  }
+  const themeBtn = document.getElementById('theme');
+  if (themeBtn) {
+    const keys = Object.keys(THEMES);
+    let theme = keys.includes(saved('bta-theme', 'auto')) ? saved('bta-theme', 'auto') : 'auto';
+    applyTheme(theme);
+    themeBtn.addEventListener('click', () => {
+      theme = keys[(keys.indexOf(theme) + 1) % keys.length];
+      save('bta-theme', theme);
+      applyTheme(theme);
+    });
+  }
 
   window.addEventListener('hashchange', route);
   route();

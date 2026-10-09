@@ -27,6 +27,10 @@
       ['active', 'Target position'],
       ['sorted', 'In its final place'],
     ],
+    kinds: {
+      min: 'Finding the smallest',
+      place: 'Where the smallest goes',
+    },
     summary:
       'Each round scanned the whole unsorted part to find its minimum, then made a single swap. ' +
       'That always costs about n²/2 comparisons, even on sorted input, but at most n − 1 swaps. ' +
@@ -60,6 +64,7 @@
 
         steps.push({
           line: 3,
+          kind: 'min',
           view: view(),
           prompt: `Find the <b>smallest</b> value in the unsorted part (positions ${i}–${n - 1}) and click it.`,
           ask: { type: 'pick', answer: [String(m)] },
@@ -82,6 +87,7 @@
 
         steps.push({
           line: 4,
+          kind: 'place',
           view: before,
           prompt: `Where does <b>${mv}</b> go? Click its new position.`,
           ask: { type: 'pick', answer: [String(i)], position: true },
