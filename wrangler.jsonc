@@ -1,0 +1,9 @@
+{
+  // Cloudflare Workers Builds publishes the repo root as static assets. Without this
+  // file, builds of branches other than main can't tell where the site is.
+  "name": "multimedia",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "."
+  }
+}
