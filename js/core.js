@@ -289,13 +289,23 @@
 
   // ---------- array views ----------
 
-  // Bar heights, as a percentage from `floor` to 100. With nothing negative a bar is
-  // proportional to its value; otherwise bars are measured up from the smallest value,
-  // so negative numbers still get bars that put them in order.
-  BTA.barHeight = (min, max, floor = 8) => {
+  // Bar geometry, as percentages of the space the bars have. Bars stand on a zero line
+  // and reach up to their value, or hang down to it for a negative number, so a bar is
+  // always proportional to its value. The zero line is at the bottom unless something
+  // is negative. `floor` keeps the smallest bars visible.
+  BTA.barScale = (min, max, floor = 8) => {
     const lo = Math.min(0, min);
-    const span = max - lo;
-    return (v) => (span > 0 ? Math.min(100, Math.max(floor, Math.round(((v - lo) / span) * 100))) : floor);
+    const span = Math.max(0, max) - lo;
+    const zero = span > 0 ? Math.round((-lo / span) * 100) : 0;
+    return {
+      zero,
+      // b: where the bar's bottom edge is, h: its height.
+      bar(v) {
+        const room = v < 0 ? zero : 100 - zero;
+        const h = span > 0 ? Math.min(room, Math.max(floor, Math.round((Math.abs(v) / span) * 100))) : floor;
+        return { b: v < 0 ? zero - h : zero, h };
+      },
+    };
   };
 
   // Items carry a stable id so the renderer can animate them as they move.

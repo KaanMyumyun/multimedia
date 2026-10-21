@@ -25,6 +25,7 @@
     return k + (t >= 11 && t <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] || 'th');
   };
   const isSorted = (v) => v.every((x, i) => i === 0 || v[i - 1] < x);
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   function makeValues(n, shape) {
     const v = BTA.distinct(n, 1, Math.max(12, 2 * n)).sort((x, y) => x - y);
@@ -46,6 +47,25 @@
 
   // The growth chart builds its arrays the same way.
   BTA.raceValues = makeValues;
+
+  // Lane bars, shaped like BTA.barScale's but sized by rank: each bar is one step taller
+  // than the next smaller value's, standing on the zero line or hanging from it. A linear
+  // scale squashes small numbers flat when the range is wide (1 to 15 next to -99 and 99);
+  // ranks keep every bar distinct, and the numbers on the bars give the actual values.
+  function rankScale(values) {
+    const sorted = values.slice().sort((x, y) => x - y);
+    const step = 100 / sorted.length;
+    const neg = sorted.filter((v) => v < 0).length;
+    const zero = neg * step;
+    return {
+      zero,
+      bar(v) {
+        const i = sorted.indexOf(v);
+        const h = (i < neg ? neg - i : i - neg + 1) * step;
+        return { b: i < neg ? zero - h : zero, h };
+      },
+    };
+  }
 
   function checkTyped(params) {
     const r = BTA.parseNumbers(params.get('a') || '');
@@ -157,12 +177,14 @@
 
         <section class="sheet stage-sheet race-track" aria-label="The race">
           <ol class="lanes" id="r-lanes"></ol>
+          <div class="sr-only" id="r-log" role="log" aria-live="polite"></div>
         </section>
         <section class="sheet desk race-desk" id="r-desk"></section>
       </div>`;
 
     const $ = (id) => document.getElementById(id);
     const lanesEl = $('r-lanes');
+    const logEl = $('r-log');
     const desk = $('r-desk');
 
     // ---------- the array ----------
@@ -214,7 +236,10 @@
       stop();
       st.phase = 'ready';
       st.tick = 0;
-      const scale = BTA.barHeight(Math.min(...st.values), Math.max(...st.values), 6);
+      const scale = rankScale(st.values);
+      lanesEl.style.setProperty('--z', `${scale.zero}%`);
+      glide();
+      logEl.replaceChildren();
       st.lanes = sorts.map((algo) => ({
         algo,
         events: algo.trace(st.values),
@@ -228,30 +253,67 @@
       lanesEl.innerHTML = st.lanes
         .map(
           (L) => `
-          <li class="lane" data-id="${L.algo.id}">
+          <li class="lane" data-id="${L.algo.id}" data-flip="lane-${L.algo.id}">
             <span class="lane-name"><a href="#/${L.algo.id}">${L.algo.name}</a><span class="lane-guess">your guess</span></span>
-            <span class="lane-bars" aria-hidden="true">${L.a
-              .map((v) => `<span class="lb" style="--h:${scale(v)}%"></span>`)
-              .join('')}</span>
-            <span class="lane-stats"><b class="l-cmp">0</b> comparisons · <b class="l-mov">0</b> moves</span>
-            <span class="lane-place" aria-live="polite"></span>
+            <span class="lane-run">
+              <span class="lane-bars" aria-hidden="true">${'<span class="lb"><span class="lv"></span></span>'.repeat(L.a.length)}</span>
+              <span class="lane-progress" aria-hidden="true"><span class="lane-done"></span></span>
+              <span class="sr-only l-arr"></span>
+            </span>
+            <span class="lane-stats"><b class="l-cmp">0</b> comparisons · <b class="l-mov">0</b> moves<span class="sr-only">, <span class="l-step">0</span> of ${L.events.length} steps done</span></span>
+            <span class="lane-place"></span>
           </li>`,
         )
         .join('');
       st.lanes.forEach((L) => {
         L.el = lanesEl.querySelector(`[data-id="${L.algo.id}"]`);
         L.bars = [...L.el.querySelectorAll('.lb')];
+        L.arrEl = L.el.querySelector('.l-arr');
+        L.doneEl = L.el.querySelector('.lane-done');
         L.cmpEl = L.el.querySelector('.l-cmp');
         L.movEl = L.el.querySelector('.l-mov');
+        L.stepEl = L.el.querySelector('.l-step');
         L.placeEl = L.el.querySelector('.lane-place');
         L.scale = scale;
+        L.a.forEach((v, i) => setBar(L, i, v));
+        describe(L);
       });
       markGuess();
       syncControls();
       renderDesk();
     }
 
-    const height = (L, v) => `${L.scale(v)}%`;
+    const speedMs = () => SPEEDS.find(([k]) => k === st.speed)[2];
+
+    // Bars slide to their new heights in a little under one tick.
+    const glideMs = () => (reducedMotion.matches ? 0 : Math.round(speedMs() * 0.6));
+    const glide = () => lanesEl.style.setProperty('--glide', `${glideMs()}ms`);
+
+    // A bar tall enough holds its number. A shorter one gets it just past its far end,
+    // or past the zero line when the far end is too close to the edge of the lane.
+    function setBar(L, i, v) {
+      const { b, h } = L.scale.bar(v);
+      const bar = L.bars[i];
+      bar.style.setProperty('--b', `${b}%`);
+      bar.style.setProperty('--h', `${h}%`);
+      bar.classList.toggle('neg', v < 0);
+      bar.firstChild.textContent = v;
+      const room = v < 0 ? b : 100 - b - h;
+      const out = h >= 30 ? '' : (v < 0) === (room < 30) ? 'up' : 'down';
+      const place = () => {
+        bar.classList.toggle('up', out === 'up');
+        bar.classList.toggle('down', out === 'down');
+      };
+      // A bar growing tall enough to hold its number keeps it outside until it's done growing.
+      clearTimeout(bar.settle);
+      if (!out && bar.matches('.up, .down')) bar.settle = setTimeout(place, glideMs());
+      else place();
+    }
+
+    // What the bars show, for screen readers.
+    function describe(L) {
+      L.arrEl.textContent = `Array: ${L.a.join(', ')}`;
+    }
 
     function apply(L, e) {
       for (const i of L.hl) L.bars[i].classList.remove('cmp', 'mov');
@@ -262,13 +324,15 @@
         L.hl = [i, j];
       } else if (op === 's') {
         [L.a[i], L.a[j]] = [L.a[j], L.a[i]];
-        L.bars[i].style.setProperty('--h', height(L, L.a[i]));
-        L.bars[j].style.setProperty('--h', height(L, L.a[j]));
+        setBar(L, i, L.a[i]);
+        setBar(L, j, L.a[j]);
+        describe(L);
         L.mov += 2;
         L.hl = [i, j];
       } else if (op === 'w') {
         L.a[i] = j;
-        L.bars[i].style.setProperty('--h', height(L, j));
+        setBar(L, i, j);
+        describe(L);
         L.mov++;
         L.hl = [i];
       } else if (op === 'r') {
@@ -278,7 +342,8 @@
       for (const k of L.hl) L.bars[k].classList.add(cls);
     }
 
-    function tick() {
+    // quiet: skipping to the end, so the finishes aren't read out one by one.
+    function tick(quiet = false) {
       st.tick++;
       const finished = [];
       for (const L of st.lanes) {
@@ -294,13 +359,23 @@
         L.el.classList.add('finished');
         L.placeEl.textContent = ordinal(place);
       }
+      if (finished.length && !quiet) {
+        const line = document.createElement('p');
+        line.textContent = `${BTA.list(finished.map((L) => L.algo.name))} finished ${ordinal(place)}.`;
+        logEl.append(line);
+      }
       for (const L of st.lanes) {
         L.cmpEl.textContent = L.cmp;
         L.movEl.textContent = L.mov;
+        L.stepEl.textContent = L.i;
+        L.doneEl.style.setProperty('--p', ((L.i / L.events.length) * 100).toFixed(1));
       }
       if (st.lanes.every((L) => L.place)) {
         stop();
         st.phase = 'done';
+        // Line the lanes up in finishing order; ties keep book order.
+        const order = st.lanes.slice().sort((x, y) => x.place - y.place);
+        BTA.flip(lanesEl, () => lanesEl.append(...order.map((L) => L.el)));
         renderDesk();
       }
     }
@@ -313,16 +388,25 @@
     function run() {
       stop();
       st.phase = 'running';
-      const ms = SPEEDS.find(([k]) => k === st.speed)[2];
-      st.timer = setInterval(tick, ms);
+      st.timer = setInterval(tick, speedMs());
       renderDesk();
+    }
+
+    // One tick at a time; the race stays paused in between.
+    function step() {
+      if (st.phase !== 'paused') {
+        stop();
+        st.phase = 'paused';
+        renderDesk();
+      }
+      tick();
     }
 
     function finishNow() {
       stop();
       while (st.phase !== 'done') {
         st.phase = 'running';
-        tick();
+        tick(true);
       }
     }
 
@@ -338,14 +422,23 @@
       </label>`;
     }
 
+    // Redrawing the desk replaces the control that had focus. Focus moves to the control
+    // with the same id, or else to the desk's main one, so keyboard and screen reader
+    // users keep their place.
     function renderDesk() {
-      const shapeLabel = st.shape === 'custom' ? 'your own array' : SHAPES.find(([k]) => k === st.shape)[1].toLowerCase();
-      if (st.phase === 'done') return renderResults();
+      const had = desk.contains(document.activeElement) ? document.activeElement.id : null;
+      if (st.phase === 'done') renderResults();
+      else renderControls();
+      const next = had !== null && ((had && $(had)) || desk.querySelector('[data-focus]'));
+      if (next) next.focus({ preventScroll: true });
+    }
 
+    function renderControls() {
+      const shapeLabel = st.shape === 'custom' ? 'your own array' : SHAPES.find(([k]) => k === st.shape)[1].toLowerCase();
       const guessName = st.guess && BTA.get(st.guess).name;
       desk.innerHTML = `
         <div class="desk-top">
-          <span class="desk-label">${st.phase === 'ready' ? 'Before the race' : 'Racing'}</span>
+          <span class="desk-label">${{ ready: 'Before the race', running: 'Racing', paused: 'Paused' }[st.phase]}</span>
           <span class="desk-meta">n = ${st.values.length} · ${shapeLabel}</span>
         </div>
         ${
@@ -354,18 +447,20 @@
                <div class="choices race-choices">${sorts
                  .map(
                    (a, i) =>
-                     `<button class="choice" type="button" data-guess="${a.id}" aria-pressed="${a.id === st.guess}"><span class="bubble" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span>${a.name}</span></button>`,
+                     `<button class="choice" id="r-guess-${a.id}" type="button" data-guess="${a.id}" aria-pressed="${a.id === st.guess}"><span class="bubble" aria-hidden="true">${String.fromCharCode(65 + i)}</span><span>${a.name}</span></button>`,
                  )
                  .join('')}</div>
                <p class="instr">${guessName ? `Your guess: ${guessName}. ` : ''}Pick one, or just start the race.</p>`
-            : `<p class="prompt">${guessName ? `Your guess: <b>${guessName}</b>. ` : ''}Yellow bars are being compared and orange bars are being moved. A lane finishes when its sort has done every step.</p>`
+            : `<p class="prompt">${guessName ? `Your guess: <b>${guessName}</b>. ` : ''}Yellow bars are being compared and orange bars are being moved. The line under each lane fills up as its sort works through its steps.</p>`
         }
         <div class="desk-actions race-actions">
           ${speedPicker()}
           ${
             st.phase === 'ready'
-              ? '<button class="btn primary" id="r-go" type="button">Start the race</button>'
-              : `<button class="btn" id="r-pause" type="button">${st.phase === 'paused' ? 'Resume' : 'Pause'}</button>
+              ? `<button class="btn" id="r-step" type="button">Step</button>
+                 <button class="btn primary" id="r-go" type="button" data-focus>Start the race</button>`
+              : `<button class="btn" id="r-pause" type="button" data-focus>${st.phase === 'paused' ? 'Resume' : 'Pause'}</button>
+                 ${st.phase === 'paused' ? '<button class="btn" id="r-step" type="button">Step</button>' : ''}
                  <button class="btn quiet" id="r-skip" type="button">Skip to the end</button>
                  <button class="btn quiet" id="r-reset" type="button">Start over</button>`
           }
@@ -376,12 +471,11 @@
           st.guess = st.guess === b.dataset.guess ? null : b.dataset.guess;
           markGuess();
           renderDesk();
-          const again = desk.querySelector(`[data-guess="${b.dataset.guess}"]`);
-          if (again) again.focus();
         }),
       );
       $('r-speed').addEventListener('change', (e) => {
         st.speed = e.target.value;
+        glide();
         if (st.phase === 'running') run();
       });
       const on = (id, fn) => $(id) && $(id).addEventListener('click', fn);
@@ -397,6 +491,7 @@
           renderDesk();
         }
       });
+      on('r-step', step);
       on('r-skip', finishNow);
       on('r-reset', reset);
     }
@@ -441,7 +536,7 @@
           <span class="desk-label">Results</span>
           <span class="desk-meta">n = ${st.values.length} · ${st.shape === 'custom' ? 'your own array' : SHAPES.find(([k]) => k === st.shape)[1].toLowerCase()}</span>
         </div>
-        <p class="teacher-note race-verdict">${verdict}</p>
+        <p class="teacher-note race-verdict" tabindex="-1" data-focus>${verdict}</p>
 
         <div class="charts">
           ${barChart('Comparisons', 'Times two elements were compared.', rows, 'cmp', 'comparisons')}
