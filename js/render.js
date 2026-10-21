@@ -83,12 +83,14 @@
   // ---------- arrays ----------
 
   // Cells: { value, state, key, flip }, or { ghost } for an empty slot, or { spacer } for an
-  // invisible one (to line rows up). Letters get no bar.
-  function cellNode(c, height, index) {
+  // invisible one (to line rows up). Letters get no bar. With negative numbers about, each
+  // tile also draws the zero line its bar stands on or hangs from.
+  function cellNode(c, scale, index) {
     if (c && c.spacer) return el('div', { class: 'cell spacer', 'aria-hidden': 'true' });
     if (!c || c.ghost) return el('div', { class: 'cell ghost', 'aria-hidden': 'true' });
     const clickable = c.key != null;
     const numeric = typeof c.value === 'number';
+    const bar = numeric && scale.bar(c.value);
     const node = el(
       clickable ? 'button' : 'div',
       {
@@ -97,16 +99,17 @@
         'data-key': clickable ? c.key : null,
         type: clickable ? 'button' : null,
         'aria-label': clickable ? `${c.value}, position ${index}` : null,
-        style: numeric ? `--h:${height(c.value)}%` : null,
+        style: numeric ? `--b:${bar.b}%;--h:${bar.h}%` : null,
       },
       numeric ? el('span', { class: 'bar', 'aria-hidden': 'true' }) : null,
+      numeric && scale.zero > 0 ? el('span', { class: 'zero', 'aria-hidden': 'true', style: `--z:${scale.zero}%` }) : null,
       el('span', { class: 'val' }, String(c.value)),
     );
     return node;
   }
 
   // Buckets (radix sort): a row of columns, each a clickable bucket holding a stack of tiles.
-  function bucketRow(b, height) {
+  function bucketRow(b) {
     const cols = b.cols.map((col) =>
       el(
         col.key != null ? 'button' : 'div',
@@ -121,7 +124,7 @@
           'span',
           { class: 'bucket-items' },
           ...col.cells.map((t) =>
-            el('span', { class: `btile s-${t.state || 'idle'}`, 'data-flip': t.flip, style: `--h:${height(t.value)}%` }, String(t.value)),
+            el('span', { class: `btile s-${t.state || 'idle'}`, 'data-flip': t.flip }, String(t.value)),
           ),
         ),
       ),
@@ -129,10 +132,10 @@
     return el('div', { class: 'buckets-wrap' }, b.label ? el('div', { class: 'row-label' }, b.label) : null, el('div', { class: 'buckets', style: `--cols:${cols.length}` }, ...cols));
   }
 
-  function arrayRow(row, height) {
+  function arrayRow(row, scale) {
     const track = el('div', { class: 'track', style: `--n:${row.cells.length}` });
     row.cells.forEach((c, i) => {
-      const slot = el('div', { class: 'slot' }, cellNode(c, height, i));
+      const slot = el('div', { class: 'slot' }, cellNode(c, scale, i));
       if (row.showIndex && !(c && c.spacer)) slot.append(el('span', { class: 'idx' }, String(i)));
       const tags = row.ptrs && row.ptrs[i];
       if (tags && tags.length) slot.append(el('span', { class: 'ptrs' }, ...tags.map((t) => el('span', { class: 'ptr' }, t))));
@@ -198,12 +201,12 @@
     let min = 0;
     const cells = view.rows.flatMap((r) => r.cells).concat(view.buckets ? view.buckets.cols.flatMap((c) => c.cells) : []);
     for (const c of cells) if (c && typeof c.value === 'number' && c.value < min) min = c.value;
-    const height = BTA.barHeight(min, view.max);
+    const scale = BTA.barScale(min, view.max);
     // aligned: rows that must stay lined up slot for slot (text search) never wrap; they scroll together.
     const rows = el('div', { class: 'rows' + (view.aligned ? ' aligned' : '') });
-    view.rows.forEach((r) => rows.append(arrayRow(r, height)));
+    view.rows.forEach((r) => rows.append(arrayRow(r, scale)));
     wrap.append(rows);
-    if (view.buckets) wrap.append(bucketRow(view.buckets, height));
+    if (view.buckets) wrap.append(bucketRow(view.buckets));
     return wrap;
   }
 
@@ -379,6 +382,14 @@
     if (!view || view.kind !== 'graph' || stage.btaNarrow === stage.clientWidth < 560) return false;
     BTA.render(stage, view, { animate: false });
     return true;
+  };
+
+  // Run `change` on the DOM under root and animate every [data-flip] element from where
+  // it was to where it ends up.
+  BTA.flip = function (root, change) {
+    const before = capture(root);
+    change();
+    play(root, before);
   };
 
   // Toggle a marker class on every clickable element whose key is in `keys`.

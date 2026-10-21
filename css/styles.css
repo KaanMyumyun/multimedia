@@ -163,6 +163,19 @@ a:hover {
   color: var(--ink-3);
 }
 
+/* Read out by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 kbd {
   padding: 0 5px;
   border: 1px solid var(--rule-2);
@@ -984,9 +997,16 @@ select {
 
 .cell .bar {
   position: absolute;
-  inset: auto 0 0;
+  inset: auto 0 var(--b, 0);
   height: var(--h);
   background: var(--tile-bar);
+}
+
+/* Drawn only when the array has negative numbers: bars stand on it or hang from it. */
+.cell .zero {
+  position: absolute;
+  inset: auto 0 var(--z);
+  border-top: 1px dashed color-mix(in srgb, currentColor 45%, transparent);
 }
 
 .cell:is(.s-sorted, .s-visited, .s-done) .bar {
@@ -2564,19 +2584,82 @@ button.cell {
   display: inline;
 }
 
+.lane-run {
+  display: grid;
+  gap: 6px;
+}
+
 .lane-bars {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 2px;
   height: 44px;
-  border-bottom: 1px solid var(--rule-2);
 }
 
+/* The zero line: at the bottom unless the array has negative numbers. */
+.lane-bars::before {
+  content: '';
+  position: absolute;
+  inset: auto 0 var(--z, 0);
+  border-top: 1px solid var(--rule-2);
+}
+
+/* Bars stand on the zero line, or hang from it (.neg). */
 .lb {
+  position: relative;
+  bottom: var(--b);
   flex: 1 1 0;
   height: var(--h);
+  container-type: inline-size;
   border-radius: 2px 2px 0 0;
   background: var(--ink-3);
+  transition:
+    height var(--glide),
+    bottom var(--glide);
+}
+
+.lb.neg {
+  border-radius: 0 0 2px 2px;
+}
+
+.lv {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--on-hl);
+  font: 600 clamp(8px, 44cqw, 12px) / 1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Bars too short to hold their number get it just above or below them. */
+.lb:is(.up, .down) .lv {
+  color: var(--ink-2);
+}
+
+.lb.up .lv {
+  top: auto;
+  bottom: 100%;
+  transform: translate(-50%, -2px);
+}
+
+.lb.down .lv {
+  top: 100%;
+  transform: translate(-50%, 2px);
+}
+
+/* A short bar's highlight is hard to see, so its number is highlighted as well. */
+.lb:is(.cmp, .mov):is(.up, .down) .lv {
+  padding: 1px 2px;
+  border-radius: 2px;
+  background: var(--hl-yellow);
+  color: var(--on-hl);
+}
+
+.lb.mov:is(.up, .down) .lv {
+  background: var(--hl-orange);
 }
 
 .lb.cmp {
@@ -2590,6 +2673,30 @@ button.cell {
 }
 
 .lane.finished .lb {
+  background: var(--ink);
+}
+
+.lane.finished .lb:not(.up, .down) .lv {
+  color: var(--paper);
+}
+
+/* How much of its sort's work a lane has done. */
+.lane-progress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--rule);
+}
+
+.lane-done {
+  display: block;
+  width: calc(var(--p, 0) * 1%);
+  height: 100%;
+  background: var(--ink-3);
+  transition: width var(--glide) linear;
+}
+
+.lane.finished .lane-done {
   background: var(--ink);
 }
 
@@ -2624,8 +2731,11 @@ button.cell {
     grid-area: name;
   }
 
-  .lane-bars {
+  .lane-run {
     grid-area: bars;
+  }
+
+  .lane-bars {
     height: 36px;
   }
 
@@ -2663,6 +2773,11 @@ button.cell {
 
 .race-verdict {
   margin: 14px 0 4px;
+}
+
+/* Focus lands here when the results appear, for screen readers; it isn't a control. */
+.race-verdict:focus {
+  outline: none;
 }
 
 /* Bar charts: one hue per chart, your guess in blue, values at the bar tips. */
